@@ -5,7 +5,7 @@
  */
 process.env.NODE_ENV = 'test';
 process.env.JWT_SECRET = process.env.JWT_SECRET || 'test-only-secret-do-not-use-in-production-0123456789';
-process.env.MONGODB_URI = process.env.MONGODB_URI || 'mongodb://127.0.0.1:27017/webvulnapp_test';
+process.env.MONGODB_URI = process.env.MONGODB_URI || 'mongodb://127.0.0.1:27017/webvulnapp_test_api';
 // Phase 3: POST /api/scans spawns the real Scan Manager; point it at the
 // offline stub scanner so tests never touch the network.
 process.env.SCANNER_PYTHON = 'python3';
@@ -21,6 +21,23 @@ const { buildApp } = require('../src/app');
 const User = require('../src/models/User');
 const Scan = require('../src/models/Scan');
 const AuditLog = require('../src/models/AuditLog');
+const urlGuard = require('../src/security/urlGuard');
+
+// Hermetic tests: the DNS stage is mocked (structural validation stays real).
+const waitFor = async (fn, timeoutMs = 20000, interval = 200) => {
+  const start = Date.now();
+  while (Date.now() - start < timeoutMs) {
+    if (await fn()) return true;
+    await new Promise((r) => setTimeout(r, interval));
+  }
+  throw new Error('waitFor timed out');
+};
+
+let dnsSpy;
+beforeAll(() => {
+  dnsSpy = jest.spyOn(urlGuard, 'validateTargetUrl').mockImplementation(async (u) => urlGuard.normalizeTargetUrl(u));
+});
+afterAll(() => dnsSpy.mockRestore());
 
 let app;
 let admin; // admin user doc
@@ -104,13 +121,13 @@ describe('authentication foundation', () => {
   });
 });
 
-describe('targets API exposes the immutable allowlist only', () => {
-  test('GET /api/targets returns exactly the two authorized targets', async () => {
+describe('targets API describes the safety policy', () => {
+  test('GET /api/targets returns the policy and examples', async () => {
     const res = await request(app).get('/api/targets').set('Authorization', `Bearer ${adminToken}`);
     expect(res.status).toBe(200);
-    expect(res.body.targets).toHaveLength(2);
-    expect(res.body.targets.map((t) => t.id).sort()).toEqual(['DYNAMIC_TARGET', 'STATIC_TARGET']);
-    expect(res.body.targets.map((t) => t.host).sort()).toEqual(['manikmagar.com.np', 'mnk.manikmagar.com.np']);
+    expect(res.body.policy.statement).toMatch(/public HTTPS/i);
+    expect(Array.isArray(res.body.policy.requirements)).toBe(true);
+    expect(res.body.policy.examples).toContain('https://manikmagar.com.np');
   });
 
   test('targets require authentication', async () => {
@@ -118,45 +135,57 @@ describe('targets API exposes the immutable allowlist only', () => {
   });
 });
 
-describe('scan creation: the API accepts target IDs, never URLs', () => {
-  test('authorized target IDs are accepted', async () => {
-    for (const targetId of ['STATIC_TARGET', 'DYNAMIC_TARGET']) {
-      const res = await request(app).post('/api/scans').set('Authorization', `Bearer ${analystToken}`).send({ targetId });
+describe('scan creation: the API accepts public HTTPS URLs', () => {
+  test('public HTTPS URLs are accepted', async () => {
+    for (const url of ['https://example.com', 'https://example.org', 'https://manikmagar.com.np']) {
+      const res = await request(app).post('/api/scans').set('Authorization', `Bearer ${analystToken}`).send({ url });
       expect(res.status).toBe(201);
-      expect(res.body.scan.targetId).toBe(targetId);
+      expect(res.body.scan.targetUrl).toMatch(/^https:\/\//);
+      expect(res.body.scan.targetHost).toBeTruthy();
       // Scan Manager may already be running the scan by response time
       expect(['queued', 'running', 'completed']).toContain(res.body.scan.status);
+      // respect the per-user active-scan cap: wait for terminal state
+      const id = res.body.scan._id;
+      await waitFor(async () => ['completed', 'failed', 'cancelled'].includes((await Scan.findById(id)).status));
     }
   });
 
-  test.each([
-    'https://example.com', // the client tried to submit a URL
-    'https://evil.manikmagar.com.np',
-    'http://localhost',
-    'http://127.0.0.1',
-    '192.168.1.1',
-    'ARBITRARY_TARGET',
-    '',
-    null,
-    { url: 'https://example.com' },
-  ])('targetId %j rejected', async (bad) => {
+  test('legacy targetIds still work (backward compatibility)', async () => {
+    const res = await request(app).post('/api/scans').set('Authorization', `Bearer ${analystToken}`).send({ targetId: 'STATIC_TARGET' });
+    expect(res.status).toBe(201);
+    expect(res.body.scan.targetUrl).toBe('https://manikmagar.com.np/');
+    const id = res.body.scan._id;
+    await waitFor(async () => ['completed', 'failed', 'cancelled'].includes((await Scan.findById(id)).status));
+  });
+
+  test('unsafe URLs are rejected with a terse error and audited', async () => {
+    for (const bad of ['http://example.com', 'https://127.0.0.1', 'https://localhost', 'https://user:pass@example.com', 'https://example.com:8443', 'not a url']) {
+      const res = await request(app).post('/api/scans').set('Authorization', `Bearer ${analystToken}`).send({ url: bad });
+      expect(res.status).toBe(400);
+      expect(res.body.error).toMatch(/rejected|public HTTPS/i);
+    }
+    const entry = await AuditLog.findOne({ action: 'scan.target.rejected', result: 'denied' }).sort({ createdAt: -1 });
+    expect(entry).toBeTruthy();
+  });
+
+  test('missing body -> 400', async () => {
+    const res = await request(app).post('/api/scans').set('Authorization', `Bearer ${analystToken}`).send({});
+    expect(res.status).toBe(400);
+  });
+
+  test('unauthenticated scan creation rejected', async () => {
+    expect((await request(app).post('/api/scans').send({ url: 'https://example.com' })).status).toBe(401);
+  });('targetId %j rejected', async (bad) => {
     const res = await request(app).post('/api/scans').set('Authorization', `Bearer ${analystToken}`).send({ targetId: bad });
     expect(res.status).toBe(400);
     expect(res.body.allowedTargetIds).toEqual(['STATIC_TARGET', 'DYNAMIC_TARGET']);
-  });
-
-  test('rejected target attempts are audit-logged as denied', async () => {
-    await request(app).post('/api/scans').set('Authorization', `Bearer ${analystToken}`).send({ targetId: 'https://example.com' });
-    const entry = await AuditLog.findOne({ action: 'scan.target.rejected', result: 'denied' }).sort({ createdAt: -1 });
-    expect(entry).toBeTruthy();
-    expect(entry.details.requestedTargetId).toBe('https://example.com');
   });
 
   test('scan creation is audit-logged with user, target and scan IDs', async () => {
     const entry = await AuditLog.findOne({ action: 'scan.create', result: 'success' }).sort({ createdAt: -1 });
     expect(entry).toBeTruthy();
     expect(entry.actor.toString()).toBeTruthy();
-    expect(['STATIC_TARGET', 'DYNAMIC_TARGET']).toContain(entry.targetId);
+    expect(entry.targetId).toMatch(/^(example\.com|example\.org|manikmagar\.com\.np|mnk\.manikmagar\.com\.np|stub\.example\.test)$/);
     expect(entry.scanId).toBeTruthy();
   });
 

@@ -1,13 +1,13 @@
 const Finding = require('../models/Finding');
-const { resolveTarget } = require('../config/targets');
 
 async function listFindings(req, res, next) {
   try {
     const filter = {};
     if (req.query.scanId && req.query.scanId.match(/^[a-f\d]{24}$/i)) filter.scan = req.query.scanId;
-    if (req.query.targetId) {
-      if (!resolveTarget(req.query.targetId)) return res.status(400).json({ error: 'Unknown targetId' });
-      filter.targetId = req.query.targetId;
+    if (req.query.target) {
+      // matches legacy targetId (STATIC_TARGET / DYNAMIC_TARGET) or a target host
+      const v = String(req.query.target).slice(0, 200).toLowerCase();
+      filter.$or = [{ targetId: v }, { targetHost: v }];
     }
     if (req.query.severity && Finding.SEVERITIES.includes(req.query.severity)) filter.severity = req.query.severity;
     if (req.query.confidence && Finding.CONFIDENCES.includes(req.query.confidence)) filter.confidence = req.query.confidence;

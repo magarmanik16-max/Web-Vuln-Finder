@@ -116,8 +116,8 @@ def run(ctx) -> list:
                 spec = CONTEXTS[context]
                 findings.append(
                     make_finding(
-                        target_id=ctx.target.target_id,
-                        target_url=ctx.target.url,
+                        target_id=ctx.target.host,
+                        target_url=ctx.target.target_url,
                         url=probe,
                         method="GET",
                         parameter=param,

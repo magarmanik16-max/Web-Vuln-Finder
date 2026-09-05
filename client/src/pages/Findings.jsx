@@ -6,7 +6,7 @@ const SELECT_CLASS = 'rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 
 
 export default function Findings() {
   const [findings, setFindings] = useState(null);
-  const [filters, setFilters] = useState({ severity: '', targetId: '', category: '', confidence: '' });
+  const [filters, setFilters] = useState({ severity: '', target: '', category: '', confidence: '' });
   const [detail, setDetail] = useState(null);
   const [error, setError] = useState('');
 
@@ -37,11 +37,12 @@ export default function Findings() {
               <option key={s} value={s}>{s}</option>
             ))}
           </select>
-          <select value={filters.targetId} onChange={set('targetId')} className={SELECT_CLASS}>
-            <option value="">All targets</option>
-            <option value="STATIC_TARGET">STATIC_TARGET</option>
-            <option value="DYNAMIC_TARGET">DYNAMIC_TARGET</option>
-          </select>
+          <input
+            value={filters.target}
+            onChange={set('target')}
+            placeholder="target host…"
+            className="w-40 rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-slate-100"
+          />
           <select value={filters.category} onChange={set('category')} className={SELECT_CLASS}>
             <option value="">All categories</option>
             {['headers', 'tls', 'cookies', 'cors', 'methods', 'disclosure', 'xss', 'sqli', 'csrf'].map((s) => (

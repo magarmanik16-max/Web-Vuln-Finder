@@ -1,6 +1,5 @@
-"""Integration contract (SCANNER.md §24): target ID, scan ID, config,
-cancellation, structured JSON output, exit codes — orchestrated end-to-end
-with fakes (no network)."""
+"""Integration contract: URL target, scan id, config, cancellation,
+structured JSON output, exit codes — orchestrated end-to-end with fakes."""
 
 import io
 import json
@@ -24,40 +23,41 @@ from scanner.main import main, run_scan  # noqa: E402
 from scanner.models.finding import make_finding  # noqa: E402
 from scanner.models.scanresult import ScanResult  # noqa: E402
 
-BASE = "https://manikmagar.com.np"
-
+BASE = "https://example.com"
 ROOT_HTML = """<html><head><title>Site</title></head><body>
 <a href="/about">about</a>
 <form action="/contact" method="POST"><input name="email"/><input name="password" type="password"/></form>
 </body></html>"""
 
-# TLS is excluded in orchestrated tests: it would open real sockets even
-# against fake IPs. All other checks run through the FakeClient.
 OFFLINE_CHECKS = ["headers", "cookies", "cors", "methods", "disclosure", "xss", "sqli", "csrf"]
 
 
 def fake_client_factory(responses):
-    def factory(config, stop_event=None, allowlist=None):
+    def factory(config, origin_host, stop_event=None, connection_factory=None):
         client = FakeClient(responses, config=config)
         client.stop_event = stop_event or threading.Event()
+        client.origin_host = origin_host
         return client
 
     return factory
 
 
 class ExitCodeTests(unittest.TestCase):
-    def test_missing_target_id_is_usage_error(self):
+    def test_missing_target_url_is_usage_error(self):
         with self.assertRaises(SystemExit) as cm:
             main([])
         self.assertEqual(cm.exception.code, 2)
 
-    def test_unknown_target_id_rejected_exit_1(self):
-        code = main(["--target-id", "EVIL_TARGET", "--scan-id", "s1"])
+    def test_private_target_rejected_exit_1(self):
+        code = main(["--target-url", "https://127.0.0.1", "--scan-id", "s1"])
         self.assertEqual(code, 1)
 
-    def test_url_as_target_rejected_exit_1(self):
-        # the scanner contract accepts IDs only; a URL is not an authorized ID
-        code = main(["--target-id", "https://example.com", "--scan-id", "s1"])
+    def test_http_scheme_rejected_exit_1(self):
+        code = main(["--target-url", "http://example.com", "--scan-id", "s1"])
+        self.assertEqual(code, 1)
+
+    def test_localhost_rejected_exit_1(self):
+        code = main(["--target-url", "https://localhost", "--scan-id", "s1"])
         self.assertEqual(code, 1)
 
 
@@ -74,12 +74,12 @@ class OrchestrationTests(unittest.TestCase):
                 return CrawlOutput(pages=[make_page(f"{BASE}/", ROOT_HTML, headers={"server": "nginx/1.2.3"})])
 
         with mock.patch("scanner.main.load_config", lambda p=None: config), \
-             mock.patch("scanner.main.validate_target_url", lambda *a, **k: None), \
+             mock.patch("scanner.main.validate_target_url", lambda u, **k: __import__("scanner.authorization", fromlist=["Target"]).authorize_target_url(u)), \
              mock.patch("scanner.main.SafeHTTPClient", fake_client_factory(responses)), \
              mock.patch("scanner.main.Crawler", crawler_patch or FakeCrawler):
             out = io.StringIO()
             with redirect_stdout(out):
-                code = main(["--target-id", "STATIC_TARGET", "--scan-id", scan_id] + (extra_args or []))
+                code = main(["--target-url", BASE, "--scan-id", scan_id] + (extra_args or []))
         return code, out.getvalue(), client
 
     def test_completed_scan_outputs_json_and_exit_0(self):
@@ -90,8 +90,8 @@ class OrchestrationTests(unittest.TestCase):
         report = json.loads(output)
         self.assertEqual(report["scan_id"], "scan-123")
         self.assertEqual(report["status"], "completed")
-        self.assertEqual(report["target"]["id"], "STATIC_TARGET")
-        self.assertEqual(report["target"]["url"], BASE)
+        self.assertEqual(report["target"]["id"], "example.com")
+        self.assertEqual(report["target"]["url"], BASE + "/")
         self.assertIn("statistics", report)
         self.assertIn("findings", report)
         self.assertIn("errors", report)
@@ -134,11 +134,11 @@ class OrchestrationTests(unittest.TestCase):
 
 class ReportRedactionTests(unittest.TestCase):
     def test_report_serialization_redacts_secret_shaped_evidence(self):
-        r = ScanResult(scan_id="s", target_id="STATIC_TARGET", target_url=BASE)
+        r = ScanResult(scan_id="s", target_id="example.com", target_url=BASE + "/")
         r.add_finding(
             make_finding(
-                target_id="STATIC_TARGET",
-                target_url=BASE,
+                target_id="example.com",
+                target_url=BASE + "/",
                 url=BASE + "/login",
                 method="POST",
                 title="t",
@@ -170,10 +170,10 @@ class StopEventUnitTests(unittest.TestCase):
             def request(self, *a, **k):
                 raise ScannerCancelled()
 
-        with mock.patch("scanner.main.validate_target_url", lambda *a, **k: None), \
-             mock.patch("scanner.main.SafeHTTPClient", lambda config, stop_event=None, allowlist=None: StoppedClient(config=config)):
+        with mock.patch("scanner.main.validate_target_url", lambda u, **k: __import__("scanner.authorization", fromlist=["Target"]).authorize_target_url(u)), \
+             mock.patch("scanner.main.SafeHTTPClient", lambda config, origin_host, stop_event=None, **k: StoppedClient(config=config)):
             with self.assertRaises(ScannerCancelled):
-                run_scan("STATIC_TARGET", "s1", stop_event=stop)
+                run_scan(BASE, "s1", stop_event=stop)
 
 
 if __name__ == "__main__":

@@ -56,7 +56,7 @@ export default function Dashboard() {
                 const total = Object.values(s.summary || {}).reduce((a, b) => a + b, 0);
                 return (
                   <li key={s._id} className="flex items-center justify-between rounded-lg bg-slate-950/60 px-3 py-2">
-                    <span className="font-mono text-xs text-emerald-300">{s.targetId}</span>
+                    <span className="font-mono text-xs text-emerald-300">{s.targetUrl || s.targetId}</span>
                     <span className="flex items-center gap-3 text-slate-400">
                       <span>{total} findings</span>
                       {s.durationMs ? <span>{Math.round(s.durationMs / 1000)}s</span> : null}
@@ -79,7 +79,7 @@ export default function Dashboard() {
                 <li key={f._id} className="flex items-center justify-between gap-3 rounded-lg bg-slate-950/60 px-3 py-2">
                   <span className="truncate text-slate-300">{f.title}</span>
                   <span className="flex shrink-0 items-center gap-2">
-                    <span className="font-mono text-xs text-emerald-300">{f.targetId}</span>
+                    <span className="font-mono text-xs text-emerald-300">{f.targetHost || f.targetId}</span>
                     <SeverityPill severity={f.severity} />
                   </span>
                 </li>

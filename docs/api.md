@@ -20,13 +20,13 @@ expiry, single-use logout via `jti` denylist.
 
 | Method & path | Auth | Notes |
 |---|---|---|
-| `GET /targets` | ✓ | exactly `STATIC_TARGET` (manikmagar.com.np, static) and `DYNAMIC_TARGET` (mnk.manikmagar.com.np, dynamic); read-only — no create/update/delete exists |
+| `GET /targets` | ✓ | Describes the target safety policy (requirements + example URLs). Read-only — no mutable target store exists |
 
 ## Scans
 
 | Method & path | Auth | Body / query | Notes |
 |---|---|---|---|
-| `POST /scans` | ✓ | `{targetId}` — **IDs only; URLs are rejected (400)** | spawns the Python scanner; bounded concurrency (default 2) with FIFO queue; 429 if ≥20 pending |
+| `POST /scans` | ✓ | `{ "url": "https://example.com" }` — any public HTTPS origin (legacy `targetId` accepted). Validated server-side (structure + DNS) before launch; `400` + audit `denied` for unsafe destinations; 429 when the per-user (2) or global pending cap is hit |
 | `GET /scans` | ✓ | `?targetId=&status=&limit=` | history |
 | `GET /scans/:id` | ✓ | – | detail incl. `progress` (currentModule, module checklist, requests, pages, endpoints), `durationMs`, timing |
 | `POST /scans/:id/cancel` | ✓ | – | SIGTERM → graceful stop; partial findings preserved; 409 for terminal scans |
@@ -37,7 +37,7 @@ Scan states: `queued → running → completed | failed | cancelled`.
 
 | Method & path | Auth | Query | Notes |
 |---|---|---|---|
-| `GET /findings` | ✓ | `?scanId=&targetId=&severity=&category=&confidence=&status=&limit=` | filters combine |
+| `GET /findings` | ✓ | `?scanId=&target=&severity=&category=&confidence=&status=&limit=` — `target` matches a host or a legacy target id | filters combine |
 | `GET /findings/:id` | ✓ | – | full contract: title, severity, confidence, url, method, parameter, description, evidence, impact, remediation, CWE, OWASP, module, detectedAt |
 
 ## Reports

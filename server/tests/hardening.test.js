@@ -4,7 +4,7 @@
  */
 process.env.NODE_ENV = 'test';
 process.env.JWT_SECRET = process.env.JWT_SECRET || 'test-only-secret-do-not-use-in-production-0123456789';
-process.env.MONGODB_URI = process.env.MONGODB_URI || 'mongodb://127.0.0.1:27017/webvulnapp_test';
+process.env.MONGODB_URI = process.env.MONGODB_URI || 'mongodb://127.0.0.1:27017/webvulnapp_test_hard';
 process.env.SCANNER_PYTHON = 'python3';
 process.env.SCANNER_ARGS = '-m stub_scanner';
 process.env.SCANNER_CWD = __dirname + '/fixtures';
@@ -17,6 +17,13 @@ const mongoose = require('mongoose');
 const jwt = require('jsonwebtoken');
 const bcrypt = require('bcryptjs');
 const { buildApp } = require('../src/app');
+const urlGuard = require('../src/security/urlGuard');
+
+let dnsSpy;
+beforeAll(() => {
+  dnsSpy = jest.spyOn(urlGuard, 'validateTargetUrl').mockImplementation(async (u) => urlGuard.normalizeTargetUrl(u));
+});
+afterAll(() => dnsSpy.mockRestore());
 const User = require('../src/models/User');
 const Scan = require('../src/models/Scan');
 const AuditLog = require('../src/models/AuditLog');
@@ -95,29 +102,51 @@ describe('JWT/session handling (§2)', () => {
   });
 });
 
-describe('adversarial target IDs at the API boundary (§3)', () => {
+describe('adversarial URLs at the API boundary (§3/§14)', () => {
+  // Genuinely unsafe: rejected by the structural gate before any DNS/network.
   test.each([
     'https://manikmagar.com.np:8443',
-    'https://manikmagar.com.np\t.evil.com',
-    'https://2130706433',
-    'https://[::ffff:7f00:1]',
-    'https://manikmagar.com.np@evil.com',
-    'https://evil.com\\@manikmagar.com.np',
-    'https://xn--mnikmagar-n1a.com.np',
-    'https://manikmagar.com.np.evil.com',
+    'https://2130706433', // decimal 127.0.0.1
+    'https://[::ffff:7f00:1]', // abbreviated IPv4-mapped loopback
+    'https://[::ffff:127.0.0.1]',
     'http://manikmagar.com.np',
-  ])('%j is not an authorized ID -> 400', async (bad) => {
-    const res = await request(app).post('/api/scans').set('Authorization', `Bearer ${token}`).send({ targetId: bad });
+    'http://localhost',
+    'https://localhost',
+    'https://127.0.0.1',
+    'https://192.168.1.1',
+    'https://169.254.169.254',
+    'https://user:password@example.com',
+  ])('%j is an unsafe target -> 400', async (bad) => {
+    const res = await request(app).post('/api/scans').set('Authorization', `Bearer ${token}`).send({ url: bad });
     expect(res.status).toBe(400);
-    expect(res.body.allowedTargetIds).toEqual(['STATIC_TARGET', 'DYNAMIC_TARGET']);
+    expect(res.body.error).toMatch(/rejected|public HTTPS/i);
   });
+
+  // Public but suspicious-looking names: accepted by the policy (they ARE
+  // public origins the user explicitly submitted); the DNS stage and the
+  // origin-scoped crawler remain the boundaries. 429 = accepted but the
+  // per-user scan cap was hit.
+  test.each([
+    'https://manikmagar.com.np\t.evil.com', // WHATWG strips tabs -> public name
+    'https://evil.com\\@manikmagar.com.np', // host is evil.com (public)
+    'https://xn--mnikmagar-n1a.com.np', // punycode name
+    'https://manikmagar.com.np.evil.com', // lookalike suffix (public)
+  ])('%j is a public origin -> accepted (201) or capped (429)', async (bad) => {
+    const res = await request(app).post('/api/scans').set('Authorization', `Bearer ${token}`).send({ url: bad });
+    expect([201, 429]).toContain(res.status);
+  });
+
+  afterAll(async () => Scan.deleteMany({}));
 });
 
 describe('scan concurrency & queue abuse (§18)', () => {
   test('scans above the concurrency cap stay queued and start FIFO', async () => {
+    // clean slate: earlier tests may have left scans draining
+    await Scan.deleteMany({});
+    for (let i = 0; i < 40 && scanManager.activeCount() > 0; i++) await sleep(250);
     process.env.STUB_MODE = 'cancelled'; // sleeps until SIGTERM — deterministic
-    const a = await request(app).post('/api/scans').set('Authorization', `Bearer ${token}`).send({ targetId: 'STATIC_TARGET' });
-    const b = await request(app).post('/api/scans').set('Authorization', `Bearer ${token}`).send({ targetId: 'DYNAMIC_TARGET' });
+    const a = await request(app).post('/api/scans').set('Authorization', `Bearer ${token}`).send({ url: 'https://stub-a.example.test/' });
+    const b = await request(app).post('/api/scans').set('Authorization', `Bearer ${token}`).send({ url: 'https://stub-b.example.test/' });
     const idA = a.body.scan._id;
     const idB = b.body.scan._id;
 
@@ -156,5 +185,5 @@ describe('rate limiting (§14)', () => {
       }
     }
     expect(throttled).toBe(true);
-  });
+  }, 30000);
 });

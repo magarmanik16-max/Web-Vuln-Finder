@@ -49,8 +49,8 @@ def check_cookie(ctx, page, name: str, flags: dict, findings: list) -> None:
     if not flags.get("secure"):
         findings.append(
             make_finding(
-                target_id=ctx.target.target_id,
-                target_url=ctx.target.url,
+                target_id=ctx.target.host,
+                target_url=ctx.target.target_url,
                 url=page.url,
                 method="GET",
                 parameter=name,
@@ -70,8 +70,8 @@ def check_cookie(ctx, page, name: str, flags: dict, findings: list) -> None:
     if sensitive and not flags.get("httponly"):
         findings.append(
             make_finding(
-                target_id=ctx.target.target_id,
-                target_url=ctx.target.url,
+                target_id=ctx.target.host,
+                target_url=ctx.target.target_url,
                 url=page.url,
                 method="GET",
                 parameter=name,
@@ -91,8 +91,8 @@ def check_cookie(ctx, page, name: str, flags: dict, findings: list) -> None:
     if flags.get("samesite", "") not in ("strict", "lax"):
         findings.append(
             make_finding(
-                target_id=ctx.target.target_id,
-                target_url=ctx.target.url,
+                target_id=ctx.target.host,
+                target_url=ctx.target.target_url,
                 url=page.url,
                 method="GET",
                 parameter=name,

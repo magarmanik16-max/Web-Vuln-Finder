@@ -1,5 +1,11 @@
 # Phase 2 Report — Python Vulnerability Scanner
 
+> NOTE: historical phase record. The target model later changed to
+> user-supplied public HTTPS origins with the same SSRF safety boundary —
+> see docs/security.md. Statements below about the two-domain allowlist
+> describe the platform as it was at the end of this phase.
+
+
 Status: **COMPLETE** (all Definition-of-Done items satisfied). Phase 3 has NOT
 been started. Phase 1 code, tests and security controls were not modified
 except for two additive scanner-facing functions in `scanner/authorization.py`

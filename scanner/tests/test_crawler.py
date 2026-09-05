@@ -27,13 +27,13 @@ def crawl(pages: dict, **cfg):
 
 class NormalizeTests(unittest.TestCase):
     def test_relative_and_absolute(self):
-        self.assertEqual(normalize_url(f"{BASE}/a/", "/b"), f"{BASE}/b")
-        self.assertEqual(normalize_url(f"{BASE}/a/", f"{BASE}/b"), f"{BASE}/b")
+        self.assertEqual(normalize_url(f"{BASE}/a/", "/b", "manikmagar.com.np"), f"{BASE}/b")
+        self.assertEqual(normalize_url(f"{BASE}/a/", f"{BASE}/b", "manikmagar.com.np"), f"{BASE}/b")
 
     def test_fragment_and_query_order_normalized(self):
-        self.assertEqual(normalize_url(f"{BASE}/", f"{BASE}/p?b=2&a=1#frag"), f"{BASE}/p?a=1&b=2")
+        self.assertEqual(normalize_url(f"{BASE}/", f"{BASE}/p?b=2&a=1#frag", "manikmagar.com.np"), f"{BASE}/p?a=1&b=2")
         # same URL with different param order dedupes to one canonical form
-        self.assertEqual(normalize_url(f"{BASE}/", f"{BASE}/p?a=1&b=2"), f"{BASE}/p?a=1&b=2")
+        self.assertEqual(normalize_url(f"{BASE}/", f"{BASE}/p?a=1&b=2", "manikmagar.com.np"), f"{BASE}/p?a=1&b=2")
 
     def test_out_of_origin_dropped(self):
         for candidate in (
@@ -49,7 +49,7 @@ class NormalizeTests(unittest.TestCase):
             "",
             None,
         ):
-            self.assertIsNone(normalize_url(f"{BASE}/", candidate), candidate)
+            self.assertIsNone(normalize_url(f"{BASE}/", candidate, "manikmagar.com.np"), candidate)
 
 
 class CrawlerBoundaryTests(unittest.TestCase):

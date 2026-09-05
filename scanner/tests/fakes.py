@@ -16,9 +16,10 @@ from scanner.authorization import Target
 PUBLIC_IP = "93.184.216.34"  # fictional public IP used by fake resolvers
 
 
-def make_target(target_id: str = "STATIC_TARGET") -> Target:
-    url = "https://manikmagar.com.np" if target_id == "STATIC_TARGET" else "https://mnk.manikmagar.com.np"
-    return Target(target_id=target_id, host=urlsplit(url).hostname, url=url, type="static")
+def make_target(url: str = "https://manikmagar.com.np") -> Target:
+    from scanner.authorization import authorize_target_url
+
+    return authorize_target_url(url)
 
 
 class FakeResponse:
@@ -78,6 +79,7 @@ class FakeClient:
         self.requests: list[tuple[str, str]] = []
         self.requests_made = 0
         self.probe_result = {"http_status": 301, "location": "https://x/", "upgrades_to_https": True}
+        self.origin_host = "manikmagar.com.np"
 
     def request(self, method, url, headers=None, body=None, follow_redirects=True):
         self.requests.append((method.upper(), url))
@@ -111,8 +113,8 @@ class FakeClient:
     def _validated_ip(self, host):
         return PUBLIC_IP
 
-    def probe_http_redirect(self, target):
-        self.requests.append(("HEAD", f"http://{target.host}/"))
+    def probe_http_redirect(self, target_host):
+        self.requests.append(("HEAD", f"http://{target_host}/"))
         return self.probe_result
 
 
@@ -137,5 +139,5 @@ def make_ctx(client: FakeClient, pages: list[Page] | None = None, forms: list[Fo
         config=client.config,
         client=client,
         crawl=crawl,
-        result=ScanResult(scan_id=str(uuid.uuid4()), target_id=target.target_id, target_url=target.url),
+        result=ScanResult(scan_id=str(uuid.uuid4()), target_id=target.host, target_url=target.target_url),
     )

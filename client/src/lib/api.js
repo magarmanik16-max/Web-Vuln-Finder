@@ -45,7 +45,7 @@ export const api = {
   targets: () => request('/targets'),
   scans: (params = '') => request(`/scans${params}`),
   scan: (id) => request(`/scans/${id}`),
-  createScan: (targetId) => request('/scans', { method: 'POST', body: { targetId } }),
+  createScan: (url) => request('/scans', { method: 'POST', body: { url } }),
   cancelScan: (id) => request(`/scans/${id}/cancel`, { method: 'POST' }),
   findings: (params = '') => request(`/findings${params}`),
   finding: (id) => request(`/findings/${id}`),

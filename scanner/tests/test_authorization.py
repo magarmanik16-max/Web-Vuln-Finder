@@ -1,5 +1,9 @@
-"""Security tests for the Python authorization interface (mirror of the Node
-suite — no network: the DNS resolver is injected)."""
+"""Target safety policy tests (general-purpose model).
+
+Any PUBLIC https:// origin is authorized; private/loopback/link-local/
+reserved/unsafe destinations and unsafe URL forms are rejected. The DNS
+stage is tested with an INJECTED resolver (no network).
+"""
 
 import os
 import sys
@@ -11,124 +15,125 @@ from scanner.authorization import (  # noqa: E402
     Target,
     UnauthorizedTargetError,
     assert_authorized_redirect,
-    load_allowlist,
-    resolve_target_id,
+    authorize_request_url,
+    authorize_target_url,
     validate_target_url,
 )
 
-STATIC = "https://manikmagar.com.np"
-DYNAMIC = "https://mnk.manikmagar.com.np"
+PUBLIC = "93.184.216.34"
 
 
-def resolver(answers):
+def res(answers):
     return lambda host: list(answers)
 
 
-class AllowlistTests(unittest.TestCase):
-    def test_load_allowlist_contains_exactly_two_targets(self):
-        al = load_allowlist()
-        self.assertEqual(sorted(al), ["DYNAMIC_TARGET", "STATIC_TARGET"])
-        self.assertEqual(al["STATIC_TARGET"].host, "manikmagar.com.np")
-        self.assertEqual(al["DYNAMIC_TARGET"].host, "mnk.manikmagar.com.np")
-
-    def test_resolve_valid_ids(self):
-        self.assertEqual(resolve_target_id("STATIC_TARGET").host, "manikmagar.com.np")
-        self.assertEqual(resolve_target_id("DYNAMIC_TARGET").host, "mnk.manikmagar.com.np")
-
-    def test_resolve_rejects_unknown_ids_and_non_strings(self):
-        for bad in ("EVIL_TARGET", "https://example.com", "", None, 42):
-            with self.assertRaises(UnauthorizedTargetError):
-                resolve_target_id(bad)
-
-
-class UrlValidationTests(unittest.TestCase):
-    def test_authorized_urls_pass_without_dns(self):
-        al = load_allowlist()
-        self.assertEqual(validate_target_url(STATIC, al, resolver=resolver(["1.2.3.4"])).target_id, "STATIC_TARGET")
-
-    def test_authorized_urls_pass_with_public_dns_answers(self):
-        al = load_allowlist()
-        t = validate_target_url(STATIC, al, resolver=resolver(["104.21.0.5", "172.67.0.5"]))
-        self.assertEqual(t.target_id, "STATIC_TARGET")
-
-    def test_malformed_rejected(self):
-        al = load_allowlist()
-        for bad in ("", "   ", "not a url", "https://", None, 123):
-            with self.assertRaises(UnauthorizedTargetError):
-                validate_target_url(bad, al, resolver=resolver([]))
-
-    def test_scheme_port_userinfo_path_rejected(self):
-        al = load_allowlist()
-        for bad in (
-            "http://manikmagar.com.np",
-            "ftp://manikmagar.com.np",
-            "https://manikmagar.com.np:8443",
-            "https://user@manikmagar.com.np",
-            "https://user:pass@manikmagar.com.np",
-            "https://manikmagar.com.np/admin",
-            "https://manikmagar.com.np?x=1",
-            "https://manikmagar.com.np#f",
-        ):
-            with self.assertRaises(UnauthorizedTargetError):
-                validate_target_url(bad, al, resolver=resolver([]))
-
-    def test_arbitrary_domains_and_subdomains_rejected(self):
-        al = load_allowlist()
-        for bad in (
+class StructuralPolicyTests(unittest.TestCase):
+    def test_public_https_origins_are_authorized_and_normalized(self):
+        for url in (
             "https://example.com",
-            "https://google.com",
-            "https://evil.manikmagar.com.np",
-            "https://manikmagar.com.np.evil.com",
-            "https://evilmanikmagar.com.np",
-            "https://www.manikmagar.com.np",
-            "https://manikmagar.com.np.",
+            "https://example.org",
+            "https://public-test-domain.example",
+            "https://manikmagar.com.np",  # the original two domains remain valid
+            "https://mnk.manikmagar.com.np",
+            "https://Example.COM/",  # case-normalized
         ):
-            with self.assertRaises(UnauthorizedTargetError):
-                validate_target_url(bad, al, resolver=[])
+            t = authorize_target_url(url)
+            self.assertIsInstance(t, Target)
+            self.assertTrue(t.target_url.startswith("https://"))
+            self.assertEqual(t.target_url, f"https://{t.host}/")
 
-    def test_ips_and_localhost_rejected(self):
-        al = load_allowlist()
-        for bad in (
-            "http://localhost",
-            "http://127.0.0.1",
-            "https://192.168.1.1",
+    def test_submitted_paths_are_normalized_to_the_origin(self):
+        t = authorize_target_url("https://example.com/some/page?x=1")
+        self.assertEqual(t.target_url, "https://example.com/")
+
+    def test_non_https_schemes_rejected(self):
+        for url in (
+            "http://example.com",
+            "ftp://example.com",
+            "file:///etc/passwd",
+            "javascript:alert(1)",
+            "data:text/html,x",
+            "ws://example.com",
+            "wss://example.com",
+        ):
+            with self.assertRaises(UnauthorizedTargetError, msg=url):
+                authorize_target_url(url)
+
+    def test_userinfo_and_ports_rejected(self):
+        for url in (
+            "https://user@example.com",
+            "https://user:password@example.com",
+            "https://example.com:8443",
+            "https://example.com:80",
+            "https://example.com:443",
+        ):
+            with self.assertRaises(UnauthorizedTargetError, msg=url):
+                authorize_target_url(url)
+
+    def test_malformed_and_unexpected_forms_rejected(self):
+        for url in ("", "   ", "not a url", "https://", None, 42, "https://example.com.", "https://ex%20ample.com"):
+            with self.assertRaises(UnauthorizedTargetError, msg=str(url)):
+                authorize_target_url(url)
+
+    def test_ip_literals_must_be_global(self):
+        # public literals allowed
+        for url in ("https://93.184.216.34", "https://[2606:4700::1111]"):
+            t = authorize_target_url(url)
+            self.assertTrue(t.target_url.startswith("https://"))
+        # non-global literals rejected — every special-use range
+        for url in (
+            "https://127.0.0.1",
             "https://10.0.0.1",
-            "https://172.16.0.9",
-            "https://169.254.169.254",
+            "https://172.16.0.1",
+            "https://192.168.1.1",
+            "https://169.254.169.254",  # cloud metadata
+            "https://0.0.0.0",
+            "https://100.64.0.1",  # CGNAT
+            "https://198.18.0.1",  # benchmarking
+            "https://224.0.0.1",  # multicast
             "https://[::1]",
-            "https://[fe80::1]",
-            "https://93.184.216.34",
+            "https://[fe80::1]",  # IPv6 link-local
+            "https://[fc00::1]",  # IPv6 unique-local
+            "https://[ff02::1]",  # IPv6 multicast
+            "https://[::]",  # unspecified
+            "https://[::ffff:127.0.0.1]",  # IPv4-mapped loopback
+            "https://[::ffff:10.0.0.1]",  # IPv4-mapped private
         ):
-            with self.assertRaises(UnauthorizedTargetError):
-                validate_target_url(bad, al, resolver=[])
+            with self.assertRaises(UnauthorizedTargetError, msg=url):
+                authorize_target_url(url)
 
-    def test_non_public_dns_answers_rejected(self):
-        al = load_allowlist()
-        for answers in (
-            ["127.0.0.1"],
-            ["10.0.0.5"],
-            ["192.168.1.1"],
-            ["169.254.169.254"],
-            ["::1"],
-            ["fe80::1"],
-            ["fd00::1"],
-            ["::ffff:10.0.0.1"],
-            ["1.2.3.4", "10.9.9.9"],  # one bad record poisons the set
-            ["224.0.0.1"],
-            ["0.0.0.0"],
-        ):
-            with self.assertRaises(UnauthorizedTargetError):
-                validate_target_url(STATIC, al, resolver=resolver(answers))
+    def test_localhost_hostname_rejected_at_dns_stage(self):
+        # 'localhost' is a regular hostname structurally; the DNS/global-IP
+        # stage is what rejects it (in production it resolves to loopback).
+        with self.assertRaises(UnauthorizedTargetError):
+            validate_target_url("https://localhost", resolver=res(["127.0.0.1"]))
+
+
+class DnsStageTests(unittest.TestCase):
+    def test_public_answers_pass(self):
+        t = validate_target_url("https://example.com", resolver=res([PUBLIC, "2606:4700::1111"]))
+        self.assertEqual(t.host, "example.com")
+
+    def test_private_answer_rejected(self):
+        for answers in (["10.0.0.5"], ["192.168.1.1"], ["127.0.0.1"], ["169.254.169.254"], ["::1"], ["fe80::1"], ["fc00::1"], ["::ffff:10.0.0.1"]):
+            with self.assertRaises(UnauthorizedTargetError, msg=str(answers)):
+                validate_target_url("https://example.com", resolver=res(answers))
+
+    def test_mixed_answers_rejected_if_any_unsafe(self):
+        with self.assertRaises(UnauthorizedTargetError):
+            validate_target_url("https://example.com", resolver=res([PUBLIC, "10.9.9.9"]))
 
     def test_dns_failure_rejected(self):
         def boom(host):
             raise OSError("NXDOMAIN")
 
+        with self.assertRaises(UnauthorizedTargetError) as cm:
+            validate_target_url("https://example.com", resolver=boom)
+        self.assertEqual(cm.exception.code, "dns_failure")
         with self.assertRaises(UnauthorizedTargetError):
-            validate_target_url(STATIC, load_allowlist(), resolver=boom)
+            validate_target_url("https://example.com", resolver=res([]))
 
-    def test_unauthorized_host_never_triggers_dns(self):
-        al = load_allowlist()
+    def test_unsafe_structural_form_never_triggers_dns(self):
         called = []
 
         def spy(host):
@@ -136,27 +141,43 @@ class UrlValidationTests(unittest.TestCase):
             return []
 
         with self.assertRaises(UnauthorizedTargetError):
-            validate_target_url("https://example.com", al, resolver=spy)
+            validate_target_url("http://example.com", resolver=spy)
         self.assertEqual(called, [])
 
-    def test_redirect_policy(self):
-        t = resolve_target_id("STATIC_TARGET")
-        self.assertEqual(assert_authorized_redirect(t, "https://manikmagar.com.np").target_id, "STATIC_TARGET")
-        for bad in ("http://manikmagar.com.np", "https://mnk.manikmagar.com.np", "https://evil.com", "https://192.168.1.1"):
-            with self.assertRaises(UnauthorizedTargetError):
-                assert_authorized_redirect(t, bad)
 
+class RequestAndRedirectScopeTests(unittest.TestCase):
+    ORIGIN = "example.com"
 
-class CrossLayerConsistencyTests(unittest.TestCase):
-    """scanner/authorized_targets.json must mirror the Node allowlist."""
+    def test_same_origin_deep_paths_allowed(self):
+        self.assertEqual(
+            authorize_request_url("https://example.com/blog/post?id=5", self.ORIGIN),
+            "https://example.com/blog/post?id=5",
+        )
 
-    def test_hosts_match_node_registry(self):
-        node = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "server", "src", "config", "targets.js")
-        with open(node, encoding="utf-8") as fh:
-            src = fh.read()
-        for t in load_allowlist().values():
-            self.assertIn(f"host: '{t.host}'", src, f"{t.host} missing from Node registry")
-            self.assertIn(f"authorizedUrl: '{t.url}'", src)
+    def test_off_origin_requests_rejected(self):
+        for url in (
+            "https://another-site.com/",
+            "https://evil.example/",
+            "https://sub.example.com/",
+            "http://example.com/x",
+            "https://example.com:8443/x",
+            "https://user@example.com/x",
+            "https://127.0.0.1/x",
+        ):
+            with self.assertRaises(UnauthorizedTargetError, msg=url):
+                authorize_request_url(url, self.ORIGIN)
+
+    def test_redirect_hops_must_stay_on_origin(self):
+        self.assertEqual(assert_authorized_redirect(self.ORIGIN, "https://example.com/other"), "https://example.com/other")
+        for loc in (
+            "https://another-site.com/",
+            "http://example.com/",
+            "http://127.0.0.1",
+            "https://example.com:8443",
+            "https://169.254.169.254/latest/meta-data/",
+        ):
+            with self.assertRaises(UnauthorizedTargetError, msg=loc):
+                assert_authorized_redirect(self.ORIGIN, loc)
 
 
 if __name__ == "__main__":

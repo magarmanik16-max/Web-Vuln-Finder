@@ -6,7 +6,7 @@
 ┌──────────────────────────────────────────────────────────┐
 │ React (client/, Vite, Tailwind)                          │
 │  /login /dashboard /targets /scans /findings /reports    │
-│  Sends ONLY target IDs. No URL input exists anywhere.    │
+│  Sends a user-supplied public HTTPS target URL.          │
 └────────────────────────┬─────────────────────────────────┘
                          │ JSON over HTTP, Bearer JWT
 ┌────────────────────────▼─────────────────────────────────┐
@@ -22,9 +22,9 @@
 └────────────────────────┬─────────────────────────────────┘
                          │ HTTPS, redirect-validated
 ┌────────────────────────▼─────────────────────────────────┐
-│ Authorized targets ONLY:                                 │
-│   https://manikmagar.com.np        (STATIC_TARGET)       │
-│   https://mnk.manikmagar.com.np    (DYNAMIC_TARGET)      │
+│ User-supplied PUBLIC HTTPS origins ONLY:                 │
+│   private/loopback/link-local/reserved ranges rejected   │
+│   at every layer (Node guard + Python engine)            │
 └──────────────────────────────────────────────────────────┘
 
 Results: Python Scanner → Express → MongoDB → React Dashboard
@@ -32,20 +32,19 @@ Results: Python Scanner → Express → MongoDB → React Dashboard
 
 ## Key decisions
 
-**Targets are configuration, not data.** The allowlist lives in exactly two
-code artifacts — `server/src/config/targets.js` and
-`scanner/authorized_targets.json` (mirrored; a consistency test fails the build
-if they drift). No user input, database record, or environment variable can add
-a target. The API's only "write" surface for scans accepts a `targetId` from a
-closed enum; URLs are rejected with `400` and audited as `denied`.
+**The target boundary is the safety policy, not a name list.** A scan accepts
+a user-supplied URL; `server/src/config/targets.js` (policy + legacy mapping)
+and `server/src/security/urlGuard.js` normalize and validate it structurally
+(HTTPS only, no ports/credentials, IP literals must be globally routable) and
+then validate DNS (every answer must be a global unicast address). The
+normalized origin is stored on the scan (`targetUrl`/`targetHost`); legacy
+scans keep their `targetId` and remain displayable.
 
-**Backend resolves ID → URL.** `resolveTarget(id)` is the single resolution
-point. The frontend fetches `GET /api/targets` for display but selects by ID
-only, so the browser never controls the destination.
-
-**Python independence.** The scanner re-validates with its own implementation
-and its own copy of the allowlist. Even if the Node layer were bypassed or
-misconfigured, the scanner refuses any destination not on the list.
+**Python independence.** `scanner/scanner/authorization.py` re-implements the
+entire policy and re-validates the target URL (structure + DNS) before a
+single request is made, scopes every request/redirect to the scanned origin,
+and pins connections to validated IPs. Even a buggy Node layer cannot point
+Python at an unsafe destination.
 
 **Data model** (Mongoose):
 

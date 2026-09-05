@@ -20,7 +20,7 @@ from collections import deque
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from html.parser import HTMLParser
-from urllib.parse import parse_qsl, urlencode, urljoin, urlsplit, urlunsplit
+from urllib.parse import parse_qsl, urlencode, urljoin, urlparse, urlsplit, urlunsplit
 
 from ..authorization import UnauthorizedTargetError, authorize_request_url
 from ..httpengine import HTTPResponse, SafeHTTPClient, ScannerCancelled, ScannerHTTPError
@@ -80,7 +80,7 @@ class _HTMLLinkCollector(HTMLParser):
             self._form = None
 
 
-def normalize_url(base: str, candidate: str) -> str | None:
+def normalize_url(base: str, candidate: str, origin_host: str) -> str | None:
     """Resolve and normalize; return None for anything outside the origin rules."""
     if not candidate:
         return None
@@ -89,12 +89,13 @@ def normalize_url(base: str, candidate: str) -> str | None:
         return None
     absolute = urljoin(base, candidate)
     try:
-        authorized, parts = authorize_request_url(absolute)
+        canonical = authorize_request_url(absolute, origin_host)
     except UnauthorizedTargetError:
         return None
     # normalize: drop fragment (already), sort query params for stable dedupe
+    parts = urlparse(canonical)
     query = urlencode(sorted(parse_qsl(parts.query, keep_blank_values=True)))
-    normalized = urlunsplit(("https", authorized.host, parts.path or "/", query, ""))
+    normalized = urlunsplit(("https", parts.hostname, parts.path or "/", query, ""))
     return normalized
 
 
@@ -126,7 +127,7 @@ class Crawler:
                     out.forms.extend(page.forms)
                     with self._lock:
                         for link in links:
-                            normalized = normalize_url(page.url, link)
+                            normalized = normalize_url(page.url, link, self.target.host)
                             if not normalized or normalized in seen:
                                 continue
                             seen.add(normalized)
@@ -149,7 +150,7 @@ class Crawler:
             links = collector.links
             for f in collector.forms:
                 action = urljoin(page.url, f["action"] or page.url)
-                forms_action = normalize_url(page.url, action)
+                forms_action = normalize_url(page.url, action, self.target.host)
                 if forms_action:
                     page.forms.append(Form(action_url=forms_action, method=f["method"], inputs=f["inputs"], source_url=page.url))
         except Exception as e:  # malformed HTML must never stop the scan

@@ -77,8 +77,8 @@ def run(ctx) -> list:
             if db:
                 findings.append(
                     make_finding(
-                        target_id=ctx.target.target_id,
-                        target_url=ctx.target.url,
+                        target_id=ctx.target.host,
+                        target_url=ctx.target.target_url,
                         url=probe_url,
                         method="GET",
                         parameter=param,
@@ -113,8 +113,8 @@ def run(ctx) -> list:
                 if true_like and false_differs and (not same_status or delta >= 50):
                     findings.append(
                         make_finding(
-                            target_id=ctx.target.target_id,
-                            target_url=ctx.target.url,
+                            target_id=ctx.target.host,
+                            target_url=ctx.target.target_url,
                             url=url,
                             method="GET",
                             parameter=param,

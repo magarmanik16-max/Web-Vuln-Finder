@@ -79,8 +79,8 @@ def check_page(ctx, page, findings: list) -> None:
             continue  # CSP frame-ancestors supersedes XFO
         findings.append(
             make_finding(
-                target_id=ctx.target.target_id,
-                target_url=ctx.target.url,
+                target_id=ctx.target.host,
+                target_url=ctx.target.target_url,
                 url=page.url,
                 method="GET",
                 title=spec["title"],
@@ -109,8 +109,8 @@ def check_page(ctx, page, findings: list) -> None:
         if weak:
             findings.append(
                 make_finding(
-                    target_id=ctx.target.target_id,
-                    target_url=ctx.target.url,
+                    target_id=ctx.target.host,
+                    target_url=ctx.target.target_url,
                     url=page.url,
                     method="GET",
                     title="Content-Security-Policy contains permissive directives",

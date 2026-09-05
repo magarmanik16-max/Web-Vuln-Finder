@@ -1,5 +1,4 @@
 const mongoose = require('mongoose');
-const { TARGET_IDS } = require('../config/targets');
 
 const SEVERITIES = ['critical', 'high', 'medium', 'low', 'info', 'informational'];
 const FINDING_STATUSES = ['open', 'in_review', 'false_positive', 'resolved'];
@@ -8,7 +7,11 @@ const CONFIDENCES = ['low', 'medium', 'high'];
 const findingSchema = new mongoose.Schema(
   {
     scan: { type: mongoose.Schema.Types.ObjectId, ref: 'Scan', required: true, index: true },
-    targetId: { type: String, enum: TARGET_IDS, required: true },
+    // Target identity mirrors the parent scan: targetHost/targetUrl for new
+    // scans, legacy targetId (STATIC_TARGET / DYNAMIC_TARGET) for old ones.
+    targetId: { type: String, default: null, index: true },
+    targetHost: { type: String, default: null, index: true },
+    targetUrl: { type: String, default: null },
     severity: { type: String, enum: SEVERITIES, required: true, index: true },
     confidence: { type: String, enum: CONFIDENCES, default: 'low', index: true },
     // Phase 2 scanner contract fields — stored verbatim from scanner JSON.

@@ -1,6 +1,5 @@
 import { useEffect, useState, useCallback, useRef } from 'react';
 import { api } from '../lib/api';
-import SeverityPill from '../components/SeverityPill';
 
 const MODULE_LABELS = {
   authorization: 'Authorization',
@@ -50,9 +49,8 @@ function ProgressChecklist({ scan }) {
 }
 
 export default function Scans() {
-  const [targets, setTargets] = useState([]);
   const [scans, setScans] = useState(null);
-  const [selected, setSelected] = useState('');
+  const [url, setUrl] = useState('');
   const [message, setMessage] = useState(null);
   const [error, setError] = useState('');
   const pollRef = useRef(null);
@@ -69,10 +67,6 @@ export default function Scans() {
   }, []);
 
   useEffect(() => {
-    api.targets().then((r) => {
-      setTargets(r.targets);
-      setSelected(r.targets[0]?.id || '');
-    });
     refresh();
   }, [refresh]);
 
@@ -84,15 +78,17 @@ export default function Scans() {
     return () => clearInterval(pollRef.current);
   }, [scans, refresh]);
 
-  const start = async () => {
+  const start = async (e) => {
+    e.preventDefault();
     setMessage(null);
     setError('');
     try {
-      await api.createScan(selected);
-      setMessage({ kind: 'ok', text: `Scan queued for ${selected}.` });
+      await api.createScan(url);
+      setMessage({ kind: 'ok', text: `Scan queued for ${url}.` });
+      setUrl('');
       await refresh();
-    } catch (e) {
-      setMessage({ kind: 'err', text: e.message });
+    } catch (err) {
+      setMessage({ kind: 'err', text: err.message });
     }
   };
 
@@ -115,23 +111,23 @@ export default function Scans() {
 
       <div className="rounded-xl border border-slate-800 bg-slate-900/70 p-5">
         <h2 className="font-medium text-white">Start a scan</h2>
-        <p className="mt-1 text-sm text-slate-400">Pick an authorized target by ID. There is no way to enter a custom URL — by design.</p>
-        <div className="mt-4 flex flex-wrap items-center gap-3">
-          <select
-            value={selected}
-            onChange={(e) => setSelected(e.target.value)}
-            className="rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-slate-100 outline-none focus:border-emerald-500"
-          >
-            {targets.map((t) => (
-              <option key={t.id} value={t.id}>
-                {t.label} ({t.type})
-              </option>
-            ))}
-          </select>
-          <button onClick={start} className="rounded-lg bg-emerald-600 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-500">
-            Queue scan
+        <p className="mt-1 text-sm text-slate-400">
+          Enter a public HTTPS origin to assess. Private, loopback and otherwise unsafe destinations are rejected server-side; redirects and
+          crawling stay on the scanned origin.
+        </p>
+        <form onSubmit={start} className="mt-4 flex flex-wrap items-center gap-3">
+          <input
+            type="url"
+            required
+            value={url}
+            onChange={(e) => setUrl(e.target.value)}
+            placeholder="https://example.com"
+            className="w-80 rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-slate-100 outline-none focus:border-emerald-500"
+          />
+          <button type="submit" className="rounded-lg bg-emerald-600 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-500">
+            Start scan
           </button>
-        </div>
+        </form>
         {message && (
           <div
             className={`mt-3 rounded-lg border px-3 py-2 text-sm ${
@@ -148,7 +144,7 @@ export default function Scans() {
         <div key={scan._id} className="rounded-xl border border-sky-900 bg-slate-900/70 p-5">
           <div className="flex flex-wrap items-center justify-between gap-2">
             <div className="flex items-center gap-3">
-              <h2 className="font-medium text-white">Live scan — {scan.targetId}</h2>
+              <h2 className="font-medium text-white">Live scan — {scan.targetUrl || scan.targetId}</h2>
               <StatusBadge status={scan.status} />
             </div>
             <button onClick={() => cancel(scan._id)} className="rounded border border-rose-800 px-3 py-1.5 text-xs text-rose-300 hover:bg-rose-950/50">
@@ -190,7 +186,7 @@ export default function Scans() {
                 const total = Object.values(s.summary || {}).reduce((a, b) => a + b, 0);
                 return (
                   <tr key={s._id} className="border-t border-slate-800">
-                    <td className="py-2 font-mono text-xs text-emerald-300">{s.targetId}</td>
+                    <td className="py-2 font-mono text-xs text-emerald-300">{s.targetUrl || s.targetId}</td>
                     <td className="py-2">
                       <StatusBadge status={s.status} />
                     </td>
@@ -216,4 +212,4 @@ export default function Scans() {
   );
 }
 
-export { StatusBadge, SeverityPill };
+export { StatusBadge };

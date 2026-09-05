@@ -17,7 +17,7 @@ from ..models.finding import Confidence, Severity, make_finding
 
 def run(ctx) -> list:
     findings: list = []
-    root = ctx.target.url
+    root = ctx.target.target_url
     probe_path = f"/webvulnapp-probe-{uuid.uuid4().hex[:12]}"
 
     # 1) Allow header via OPTIONS (safe)
@@ -32,8 +32,8 @@ def run(ctx) -> list:
         if dangerous:
             findings.append(
                 make_finding(
-                    target_id=ctx.target.target_id,
-                    target_url=ctx.target.url,
+                    target_id=ctx.target.host,
+                    target_url=ctx.target.target_url,
                     url=root,
                     method="OPTIONS",
                     title=f"Server advertises potentially dangerous methods: {', '.join(dangerous)}",
@@ -57,8 +57,8 @@ def run(ctx) -> list:
         if trace.status == 200 and marker in trace.body:
             findings.append(
                 make_finding(
-                    target_id=ctx.target.target_id,
-                    target_url=ctx.target.url,
+                    target_id=ctx.target.host,
+                    target_url=ctx.target.target_url,
                     url=root,
                     method="TRACE",
                     title="TRACE method enabled (Cross-Site Tracing surface)",
@@ -80,13 +80,13 @@ def run(ctx) -> list:
     # 3) PUT/DELETE against a random non-existent probe path (nothing to modify)
     for method in ("PUT", "DELETE"):
         try:
-            resp = ctx.client.request(method, ctx.target.url.rstrip("/") + probe_path, body=b"{}" if method == "PUT" else None, follow_redirects=False)
+            resp = ctx.client.request(method, ctx.target.target_url.rstrip("/") + probe_path, body=b"{}" if method == "PUT" else None, follow_redirects=False)
             if 200 <= resp.status < 300:
                 findings.append(
                     make_finding(
-                        target_id=ctx.target.target_id,
-                        target_url=ctx.target.url,
-                        url=ctx.target.url.rstrip("/") + probe_path,
+                        target_id=ctx.target.host,
+                        target_url=ctx.target.target_url,
+                        url=ctx.target.target_url.rstrip("/") + probe_path,
                         method=method,
                         title=f"{method} accepted on a non-existent resource path",
                         category="methods",

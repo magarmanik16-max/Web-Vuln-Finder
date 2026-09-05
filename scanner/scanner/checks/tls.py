@@ -39,9 +39,9 @@ def run(ctx) -> list:
     if cert is None:
         findings.append(
             make_finding(
-                target_id=ctx.target.target_id,
-                target_url=ctx.target.url,
-                url=ctx.target.url,
+                target_id=ctx.target.host,
+                target_url=ctx.target.target_url,
+                url=ctx.target.target_url,
                 method="GET",
                 title="TLS certificate could not be validated",
                 category="tls",
@@ -50,7 +50,7 @@ def run(ctx) -> list:
                 cwe="CWE-295",
                 owasp="A02:2021",
                 description="A certificate-validating TLS connection to the authorized origin failed (expired, self-signed, mismatched, or untrusted chain).",
-                evidence={"url": ctx.target.url, "method": "GET", "detection_reason": "ssl handshake/certificate validation failed"},
+                evidence={"url": ctx.target.target_url, "method": "GET", "detection_reason": "ssl handshake/certificate validation failed"},
                 impact="Clients cannot authenticate the server; MITM becomes feasible.",
                 remediation="Renew/fix the TLS certificate and chain.",
                 module="checks.tls",
@@ -87,9 +87,9 @@ def run(ctx) -> list:
             impact = "No action required; recorded for the report."
         findings.append(
             make_finding(
-                target_id=ctx.target.target_id,
-                target_url=ctx.target.url,
-                url=ctx.target.url,
+                target_id=ctx.target.host,
+                target_url=ctx.target.target_url,
+                url=ctx.target.target_url,
                 method="GET",
                 title=title,
                 category="tls",
@@ -98,7 +98,7 @@ def run(ctx) -> list:
                 cwe="CWE-298" if days_left < 0 else "CWE-324",
                 owasp="A02:2021",
                 description=f"Certificate notAfter={not_after} ({days_left} days from scan).",
-                evidence=sanitize({"url": ctx.target.url, "method": "GET", "certificate": {"not_after": not_after, "issuer": dict(x[0] for x in cert.get("issuer", ())).get("organizationName", ""), "subject_cn": dict(x[0] for x in cert.get("subject", ())).get("commonName", "")}}),
+                evidence=sanitize({"url": ctx.target.target_url, "method": "GET", "certificate": {"not_after": not_after, "issuer": dict(x[0] for x in cert.get("issuer", ())).get("organizationName", ""), "subject_cn": dict(x[0] for x in cert.get("subject", ())).get("commonName", "")}}),
                 impact=impact,
                 remediation="Ensure automated certificate renewal (e.g. ACME/Let's Encrypt).",
                 module="checks.tls",
@@ -107,15 +107,15 @@ def run(ctx) -> list:
 
     # HTTP -> HTTPS upgrade behavior (scoped port-80 HEAD probe, no follow)
     try:
-        probe = ctx.client.probe_http_redirect(ctx.target)
+        probe = ctx.client.probe_http_redirect(ctx.target.host)
     except Exception:
         probe = None
     if probe is not None:
         if not probe["upgrades_to_https"]:
             findings.append(
                 make_finding(
-                    target_id=ctx.target.target_id,
-                    target_url=ctx.target.url,
+                    target_id=ctx.target.host,
+                    target_url=ctx.target.target_url,
                     url=f"http://{ctx.target.host}/",
                     method="HEAD",
                     title="HTTP does not redirect to HTTPS",
@@ -134,8 +134,8 @@ def run(ctx) -> list:
         else:
             findings.append(
                 make_finding(
-                    target_id=ctx.target.target_id,
-                    target_url=ctx.target.url,
+                    target_id=ctx.target.host,
+                    target_url=ctx.target.target_url,
                     url=f"http://{ctx.target.host}/",
                     method="HEAD",
                     title="HTTP redirects to HTTPS",

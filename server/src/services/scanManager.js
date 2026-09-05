@@ -26,6 +26,8 @@ const mongoose = require('mongoose');
 const Scan = require('../models/Scan');
 const Finding = require('../models/Finding');
 const { logAudit } = require('../utils/audit');
+const { targetInfo } = require('../config/targets');
+const urlGuard = require('../security/urlGuard');
 
 // __dirname = server/src/services → three levels up is the repository root.
 const REPO_ROOT = path.join(__dirname, '..', '..', '..');
@@ -72,20 +74,34 @@ function activeCount() {
  */
 function enqueue(scanDoc) {
   if (running.size < MAX_CONCURRENT) {
-    _launch(scanDoc);
+    Promise.resolve(_launch(scanDoc)).catch((err) => {
+      console.error('[scanManager] launch failed:', err.message);
+      _finalize(String(scanDoc._id), { status: 'failed', error: err.message }).catch(() => {});
+    });
   } else {
     pendingQueue.push(String(scanDoc._id));
   }
 }
 
-function _launch(scanDoc) {
+async function _launch(scanDoc) {
   const scanId = String(scanDoc._id);
   ensureDirs(); // in case recoverOrphans was not called (e.g. tests)
   const outputPath = path.join(SCAN_DATA_DIR, `${scanId}.json`);
 
+  // Defense-in-depth: re-validate the target (structural + DNS) right before
+  // spawning. The controller already validated; a buggy Node layer must not
+  // be able to point Python at an unsafe destination either.
+  const info = targetInfo(scanDoc);
+  try {
+    await urlGuard.validateTargetUrl(info.url);
+  } catch (err) {
+    await _finalize(scanId, { status: 'failed', error: `target re-validation failed: ${err.message}` });
+    return;
+  }
+
   const args = [
     ...SCANNER_ARGS,
-    '--target-id', scanDoc.targetId, // enum-validated by the controller — never a URL
+    '--target-url', info.url,        // validated + normalized server-side
     '--scan-id', scanId,             // server-generated ObjectId
     '--output', outputPath,          // server-generated path
   ];
@@ -120,10 +136,17 @@ function _launch(scanDoc) {
   });
 
   child.on('exit', async (code, signal) => {
-    const status = code === 0 ? 'completed' : code === 4 ? 'cancelled' : 'failed';
+    // A termination signal (only ever sent by cancel()) means the user asked
+    // to stop: the scan is 'cancelled' even if the scanner died before it
+    // could flush a graceful report (e.g. SIGTERM during Python startup).
+    let status;
+    if (signal) status = 'cancelled';
+    else if (code === 0) status = 'completed';
+    else if (code === 4) status = 'cancelled';
+    else status = 'failed';
     await _finalize(scanId, {
       status,
-      error: status === 'failed' ? `scanner exited with code ${code}${signal ? ` (${signal})` : ''}` : '',
+      error: status === 'failed' ? `scanner exited with code ${code}` : '',
     });
   });
 
@@ -175,10 +198,8 @@ async function _finalize(scanId, { status, error }) {
   if (!entry) return; // already finalized
   running.delete(scanId);
 
-  const scan = await Scan.findById(scanId);
-  if (!scan) return;
+  const scan = await Scan.findById(scanId).catch(() => null);
 
-  // A scan cancelled while queued never started; keep its state consistent.
   let report = null;
   try {
     if (fs.existsSync(entry.outputPath)) {
@@ -195,59 +216,65 @@ async function _finalize(scanId, { status, error }) {
   // A zero exit code with unusable output is still a failure — results cannot be trusted.
   if (!report && status === 'completed') status = 'failed';
 
-  if (report && Array.isArray(report.findings)) {
-    await _storeFindings(scan, report.findings.slice(0, MAX_FINDINGS_PER_SCAN));
+  if (scan) {
+    if (report && Array.isArray(report.findings)) {
+      await _storeFindings(scan, report.findings.slice(0, MAX_FINDINGS_PER_SCAN));
+    }
+
+    if (report && report.statistics) {
+      const bySeverity = report.statistics.findings_by_severity || {};
+      scan.summary = {
+        critical: bySeverity.critical || 0,
+        high: bySeverity.high || 0,
+        medium: bySeverity.medium || 0,
+        low: bySeverity.low || 0,
+        info: (bySeverity.info || 0) + (bySeverity.informational || 0),
+      };
+      scan.markModified('summary');
+      scan.progress = {
+        ...(scan.progress && scan.progress.toObject ? scan.progress.toObject() : scan.progress),
+        requests: report.statistics.requests_made ?? scan.progress?.requests,
+        pages: report.statistics.pages_crawled ?? scan.progress?.pages,
+        endpoints: report.statistics.endpoints ?? scan.progress?.endpoints,
+      };
+    } else {
+      const counts = await Finding.aggregate([{ $match: { scan: scan._id } }, { $group: { _id: '$severity', n: { $sum: 1 } } }]);
+      const map = Object.fromEntries(counts.map((c) => [c._id, c.n]));
+      scan.summary = { critical: map.critical || 0, high: map.high || 0, medium: map.medium || 0, low: map.low || 0, info: map.info || 0 };
+    }
+
+    scan.status = status;
+    scan.error = error || '';
+    scan.finishedAt = new Date();
+    scan.durationMs = scan.startedAt ? scan.finishedAt - scan.startedAt : 0;
+    await scan.save();
+
+    await logAudit({
+      actor: scan.requestedBy,
+      action: `scan.${status}`,
+      targetId: scan.targetHost || scan.targetId,
+      scanId: scan._id,
+      result: status === 'completed' ? 'success' : status === 'cancelled' ? 'success' : 'failure',
+      details: { durationMs: scan.durationMs, findings: report ? report.findings.length : 0 },
+    });
   }
 
-  // Update scan summary from the report statistics / stored findings.
-  if (report && report.statistics) {
-    const bySeverity = report.statistics.findings_by_severity || {};
-    scan.summary = {
-      critical: bySeverity.critical || 0,
-      high: bySeverity.high || 0,
-      medium: bySeverity.medium || 0,
-      low: bySeverity.low || 0,
-      info: (bySeverity.info || 0) + (bySeverity.informational || 0),
-    };
-    scan.progress = {
-      ...scan.progress.toObject ? scan.progress.toObject() : scan.progress,
-      requests: report.statistics.requests_made ?? scan.progress.requests,
-      pages: report.statistics.pages_crawled ?? scan.progress.pages,
-      endpoints: report.statistics.endpoints ?? scan.progress.endpoints,
-    };
-  } else {
-    const counts = await Finding.aggregate([{ $match: { scan: scan._id } }, { $group: { _id: '$severity', n: { $sum: 1 } } }]);
-    const map = Object.fromEntries(counts.map((c) => [c._id, c.n]));
-    scan.summary = { critical: map.critical || 0, high: map.high || 0, medium: map.medium || 0, low: map.low || 0, info: map.info || 0 };
-  }
-
-  scan.status = status;
-  scan.error = error || '';
-  scan.finishedAt = new Date();
-  scan.durationMs = scan.startedAt ? scan.finishedAt - scan.startedAt : 0;
-  await scan.save();
-
-  await logAudit({
-    actor: scan.requestedBy,
-    action: `scan.${status}`,
-    targetId: scan.targetId,
-    scanId: scan._id,
-    result: status === 'completed' ? 'success' : status === 'cancelled' ? 'success' : 'failure',
-    details: { durationMs: scan.durationMs, findings: report ? report.findings.length : 0 },
-  });
-
-  // clean up the output file only on success
+  // Clean up the output file only on a verified-successful run.
   if (status === 'completed') {
     try {
       fs.unlinkSync(entry.outputPath);
     } catch {}
   }
 
-  // start the next queued scan, if any
-  const nextId = pendingQueue.shift();
-  if (nextId) {
-    const next = await Scan.findById(nextId);
-    if (next && next.status === 'queued') _launch(next);
+  // Start the next queued scan — ALWAYS, even if the finished scan's record
+  // vanished, otherwise the FIFO queue jams permanently.
+  let nextId;
+  while ((nextId = pendingQueue.shift())) {
+    const next = await Scan.findById(nextId).catch(() => null);
+    if (next && next.status === 'queued') {
+      await _launch(next);
+      break;
+    }
   }
 }
 
@@ -256,6 +283,8 @@ async function _storeFindings(scan, findings) {
   const docs = findings.map((f) => ({
     scan: scan._id,
     targetId: scan.targetId,
+    targetHost: scan.targetHost,
+    targetUrl: scan.targetUrl,
     severity: f.severity || 'info',
     confidence: f.confidence || 'low',
     category: f.category || 'unknown',

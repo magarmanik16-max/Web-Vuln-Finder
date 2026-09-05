@@ -11,10 +11,11 @@ or modifies resources, uploads anything, floods endpoints, or exfiltrates data.
 
 ## Assessment pipeline
 
-1. **Authorization** — the target ID is resolved against the immutable
-   allowlist (`authorized_targets.json`); the origin URL is re-validated
-   (https, exact host, no port/userinfo) and DNS answers must all be global
-   unicast. No DNS lookup ever happens for a non-allowlisted name.
+1. **Authorization** — the user-supplied target URL is independently
+   re-validated by the engine: HTTPS only, no port/userinfo/fragments,
+   IP-literal hosts must be globally routable, and DNS answers must all be
+   global unicast. The target is normalized to its origin. Unsafe input never
+   triggers a DNS lookup.
 2. **Connectivity + crawling** — a same-origin BFS crawler fetches the
    authorized origin and follows links/forms it discovers. Limits: depth 3,
    50 pages, ≤500 requests (global budget), 512 KB responses, 15 s timeouts,
@@ -49,8 +50,8 @@ Confidence (low/medium/high) is independent of severity.
 
 ## Every-request safety net
 
-- exact allowlist host match, https only, no port/userinfo (any depth on the
-  authorized origin is allowed — the path is always within the origin);
+- origin-scoped authorization: every request URL and redirect hop must stay
+  on the scanned origin (exact host equality), https only, no port/userinfo;
 - DNS answers validated as global unicast and the TLS connection **pinned** to
   a validated IP with SNI + certificate verification (validate-then-connect);
 - manual redirects: each hop re-authorized against the exact same origin;

@@ -42,8 +42,8 @@ def run(ctx) -> list:
 
         findings.append(
             make_finding(
-                target_id=ctx.target.target_id,
-                target_url=ctx.target.url,
+                target_id=ctx.target.host,
+                target_url=ctx.target.target_url,
                 url=form.action_url,
                 method=form.method,
                 parameter=", ".join(i.get("name", "") for i in form.inputs[:8]),

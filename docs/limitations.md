@@ -35,10 +35,12 @@ security assurance.
 
 ## Security posture
 
-- The target allowlist is enforced in three independent places, but the
-  platform is intended to run on a trusted network: the API is loopback-bound
-  by default and any exposure (HOST env) should sit behind a reverse proxy,
-  TLS, and network access control.
+- The platform accepts user-supplied public HTTPS targets. It is designed to
+  **reject** private/loopback/link-local/reserved destinations at three
+  independent layers, but operators must still run it on trusted networks
+  with consented targets only: the API is loopback-bound by default and any
+  exposure (HOST env) should sit behind a reverse proxy, TLS, and network
+  access control. Only assess targets you are authorized to test.
 - The scanner is safe by construction (rate limits, budgets, non-destructive
   probes) but still sends requests to the target — run assessments with the
   owner's consent and at conservative settings.

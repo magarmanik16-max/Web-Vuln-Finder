@@ -1,54 +1,80 @@
 /**
- * SINGLE AUTHORITATIVE TARGET ALLOWLIST.
+ * TARGET SAFETY POLICY — user-supplied public HTTPS targets.
  *
- * These are the ONLY targets this platform is authorized to assess.
- * The restriction is architectural, not cosmetic:
- *   - The browser/frontend only ever sees and sends target IDs.
- *   - It can never supply a URL; the backend resolves ID -> authorized URL.
- *   - The Python scanner independently re-enforces the same list
- *     (see scanner/authorized_targets.json + scanner/scanner/authorization.py),
- *     so bypassing this Node layer is not sufficient to scan anything else.
+ * The platform is a general-purpose authorized assessment tool: an
+ * authenticated user may submit any PUBLIC https:// URL. "Authorized" is now
+ * defined by safety validation, not by a name allowlist:
  *
- * Changing this file changes the entire platform's reach. It must never be
- * extended from user input, environment config, or the database.
+ *   - HTTPS only (any other scheme is rejected)
+ *   - no credentials/userinfo, no explicit port, no fragments
+ *   - hostname must not be an IP literal in a non-global range
+ *   - DNS resolution must return only globally routable addresses
+ *   - connections are pinned to a validated IP (validate → resolve → pin → connect)
+ *   - redirects must stay on the scan's own origin
+ *   - the crawler may only follow same-origin links
+ *
+ * Private, loopback, link-local, multicast, reserved and otherwise non-global
+ * destinations are rejected at every layer (Node AND Python independently).
+ *
+ * Legacy note: the original platform hard-coded two targets. Old scan records
+ * carry targetId STATIC_TARGET / DYNAMIC_TARGET — the mapping below keeps
+ * those records displayable and still accepted as scan inputs for backward
+ * compatibility. They are examples now, never an authorization boundary.
  */
 
-const AUTHORIZED_TARGETS = Object.freeze([
-  Object.freeze({
-    id: 'STATIC_TARGET',
-    label: 'manikmagar.com.np',
-    host: 'manikmagar.com.np',
-    authorizedUrl: 'https://manikmagar.com.np',
-    type: 'static',
-    description: 'Static target — portfolio site assessed via static analysis.',
-  }),
-  Object.freeze({
-    id: 'DYNAMIC_TARGET',
-    label: 'mnk.manikmagar.com.np',
-    host: 'mnk.manikmagar.com.np',
-    authorizedUrl: 'https://mnk.manikmagar.com.np',
-    type: 'dynamic',
-    description: 'Dynamic target — live application assessed via dynamic testing.',
-  }),
-]);
+const urlGuard = require('../security/urlGuard');
 
-const TARGET_IDS = AUTHORIZED_TARGETS.map((t) => t.id);
+const LEGACY_TARGET_URLS = Object.freeze({
+  STATIC_TARGET: 'https://manikmagar.com.np',
+  DYNAMIC_TARGET: 'https://mnk.manikmagar.com.np',
+});
 
-function resolveTarget(id) {
-  if (typeof id !== 'string') return null;
-  return AUTHORIZED_TARGETS.find((t) => t.id === id) || null;
+const POLICY_REQUIREMENTS = [
+  'HTTPS protocol only',
+  'No credentials (user:password@) in the URL',
+  'Default port 443 only — no explicit ports',
+  'Hostname must resolve to globally routable IP addresses only',
+  'Private, loopback, link-local, multicast and reserved ranges are rejected',
+  'Redirects must stay on the scanned origin',
+  'Crawling is same-origin only and bounded by rate/request/depth limits',
+];
+
+/**
+ * Structural + DNS validation of a user-supplied target URL.
+ * Returns { url, host } where url is the normalized origin (https://host/).
+ * Rejects with UnauthorizedTargetError (code + statusCode 400) on any unsafe form.
+ */
+async function authorizeTarget(rawUrl, opts = {}) {
+  const normalized = urlGuard.normalizeTargetUrl(rawUrl); // structural checks
+  await urlGuard.validateTargetUrl(normalized, opts); // DNS: all answers global unicast
+  const host = new URL(normalized).hostname;
+  return { url: normalized, host };
 }
 
-/** Public shape for the API — no internals leaked. */
-function toPublicTarget(t) {
-  return {
-    id: t.id,
-    label: t.label,
-    host: t.host,
-    type: t.type,
-    description: t.description,
-    authorizedUrl: t.authorizedUrl,
-  };
+/** Accepts legacy IDs for backward compatibility; returns the mapped URL or null. */
+function legacyTargetUrl(targetId) {
+  if (typeof targetId !== 'string') return null;
+  return LEGACY_TARGET_URLS[targetId] || null;
 }
 
-module.exports = { AUTHORIZED_TARGETS, TARGET_IDS, resolveTarget, toPublicTarget };
+/** Display metadata for any scan (new or legacy). */
+function targetInfo(scan) {
+  if (scan.targetUrl) {
+    const host = scan.targetHost || new URL(scan.targetUrl).hostname;
+    return { url: scan.targetUrl, host, label: host, legacy: false };
+  }
+  const url = LEGACY_TARGET_URLS[scan.targetId];
+  if (url) {
+    const host = new URL(url).hostname;
+    return { url, host, label: host, legacy: true };
+  }
+  return { url: scan.targetId || '', host: scan.targetId || '', label: scan.targetId || '', legacy: true };
+}
+
+module.exports = {
+  LEGACY_TARGET_URLS,
+  POLICY_REQUIREMENTS,
+  authorizeTarget,
+  legacyTargetUrl,
+  targetInfo,
+};

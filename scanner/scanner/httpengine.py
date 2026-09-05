@@ -27,7 +27,6 @@ from typing import Any, Callable
 from urllib.parse import urlunparse
 
 from .authorization import (
-    Target,
     UnauthorizedTargetError,
     authorize_request_url,
     resolve_and_validate_ips,
@@ -114,13 +113,14 @@ class SafeHTTPClient:
     def __init__(
         self,
         config,
+        origin_host: str,
         stop_event: threading.Event | None = None,
-        allowlist: dict[str, Target] | None = None,
         resolver: Callable[[str], list[str]] | None = None,
         connection_factory: Callable[[str, str, float], http.client.HTTPConnection] | None = None,
     ):
         self.config = config
-        self.allowlist = allowlist
+        # The scanned origin: every request URL and redirect hop must stay on it.
+        self.origin_host = str(origin_host).lower()
         self.resolver = resolver
         self.stop_event = stop_event or threading.Event()
         self._rate = _RateLimiter(config.min_request_interval, self.stop_event)
@@ -165,8 +165,7 @@ class SafeHTTPClient:
                 raise ScannerHTTPError("request budget exhausted (max_requests)")
             self.requests_made += 1
         method = method.upper()
-        target, parts = authorize_request_url(url, self.allowlist)
-        canonical = urlunparse(parts)
+        canonical = authorize_request_url(url, self.origin_host)
         self._rate.wait()
         self._check_cancel()
 
@@ -174,7 +173,7 @@ class SafeHTTPClient:
         last_error: Exception | None = None
         for attempt in range(attempts + 1):
             try:
-                resp = self._send_once(method, canonical, headers, body, target)
+                resp = self._send_once(method, canonical, headers, body)
                 break
             except (TimeoutError, socket.timeout, ConnectionError, OSError, http.client.HTTPException) as e:
                 last_error = e
@@ -197,7 +196,7 @@ class SafeHTTPClient:
 
                 nxt = urljoin(canonical, location)
                 try:
-                    authorize_request_url(nxt, self.allowlist)
+                    authorize_request_url(nxt, self.origin_host)
                 except UnauthorizedTargetError as e:
                     raise UnauthorizedRedirectError(e.code, f"redirect to {nxt} rejected: {e}") from e
                 if nxt in chain or nxt == canonical:
@@ -207,16 +206,16 @@ class SafeHTTPClient:
 
         return resp
 
-    def _send_once(self, method: str, url: str, headers: dict[str, str], body: bytes | None, target: Target) -> HTTPResponse:
+    def _send_once(self, method: str, url: str, headers: dict[str, str], body: bytes | None) -> HTTPResponse:
         from urllib.parse import urlsplit
 
         sp = urlsplit(url)
-        ip = self._validated_ip(target.host)
+        ip = self._validated_ip(self.origin_host)
         started = time.monotonic()
-        conn = self._conn_factory(target.host, ip, self.config.request_timeout)
+        conn = self._conn_factory(self.origin_host, ip, self.config.request_timeout)
         try:
             send_headers = {
-                "Host": target.host,
+                "Host": self.origin_host,
                 "User-Agent": self.config.user_agent,
                 "Accept-Encoding": "identity",
                 "Connection": "close",
@@ -251,24 +250,25 @@ class SafeHTTPClient:
             except Exception:
                 pass
 
-    def probe_http_redirect(self, target: Target) -> dict[str, Any]:
-        """TLS check helper: observe HTTP->HTTPS behavior on the authorized host.
+    def probe_http_redirect(self, target_host: str) -> dict[str, Any]:
+        """TLS check helper: observe HTTP->HTTPS behavior on the scanned host.
 
         This is the ONLY place the engine touches port 80, and it is scoped
-        hard: the host must be allowlisted, DNS answers global unicast, only a
-        single HEAD / with no redirect following, and only status/headers are
-        examined — never the body, never the redirect destination followed.
+        hard: the host must be this scan's origin, DNS answers global unicast,
+        only a single HEAD / with no redirect following, and only
+        status/headers are examined — never the body, never the redirect
+        destination followed.
         """
         self._check_cancel()
-        if target.host not in {t.host for t in (self.allowlist or {}).values()}:
-            raise UnauthorizedTargetError("not_authorized")
+        if str(target_host).lower() != self.origin_host:
+            raise UnauthorizedTargetError("out_of_scope")
         self._rate.wait()
-        ip = self._validated_ip(target.host)
+        ip = self._validated_ip(self.origin_host)
         raw = socket.create_connection((ip, 80), timeout=self.config.request_timeout)
         try:
-            conn = http.client.HTTPConnection(target.host, 80, timeout=self.config.request_timeout)
+            conn = http.client.HTTPConnection(self.origin_host, 80, timeout=self.config.request_timeout)
             conn.sock = raw  # plain HTTP on port 80, pinned to the validated IP
-            conn.request("HEAD", "/", headers={"Host": target.host, "User-Agent": self.config.user_agent, "Connection": "close"})
+            conn.request("HEAD", "/", headers={"Host": self.origin_host, "User-Agent": self.config.user_agent, "Connection": "close"})
             r = conn.getresponse()
             r.read(1)  # drain status; headers only
             return {

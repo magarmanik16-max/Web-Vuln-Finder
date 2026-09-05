@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { render, screen, waitFor } from '@testing-library/react';
 import Targets from '../pages/Targets';
 import { api } from '../lib/api';
@@ -7,27 +7,27 @@ vi.mock('../lib/api', () => ({
   api: { targets: vi.fn() },
 }));
 
-describe('Targets page (§8)', () => {
+describe('Targets page — scope & safety policy', () => {
   beforeEach(() => {
     api.targets.mockResolvedValue({
-      targets: [
-        { id: 'STATIC_TARGET', label: 'manikmagar.com.np', host: 'manikmagar.com.np', type: 'static', description: 'Static target', authorizedUrl: 'https://manikmagar.com.np' },
-        { id: 'DYNAMIC_TARGET', label: 'mnk.manikmagar.com.np', host: 'mnk.manikmagar.com.np', type: 'dynamic', description: 'Dynamic target', authorizedUrl: 'https://mnk.manikmagar.com.np' },
-      ],
+      policy: {
+        statement: 'Any public HTTPS origin may be submitted for assessment, subject to strict URL and network safety validation.',
+        requirements: ['HTTPS protocol only', 'Private and loopback ranges are rejected'],
+        examples: ['https://manikmagar.com.np', 'https://mnk.manikmagar.com.np'],
+      },
     });
   });
 
-  it('shows exactly the two authorized targets', async () => {
+  it('describes the safety policy and example targets', async () => {
     render(<Targets />);
-    await waitFor(() => expect(screen.getByText('manikmagar.com.np')).toBeInTheDocument());
-    expect(screen.getByText('mnk.manikmagar.com.np')).toBeInTheDocument();
-    expect(screen.getByText('STATIC_TARGET')).toBeInTheDocument();
-    expect(screen.getByText('DYNAMIC_TARGET')).toBeInTheDocument();
-    expect(screen.getByText('static')).toBeInTheDocument();
-    expect(screen.getByText('dynamic')).toBeInTheDocument();
+    await waitFor(() => expect(screen.getByText(/public HTTPS origin/)).toBeInTheDocument());
+    expect(screen.getByText('Validation requirements')).toBeInTheDocument();
+    expect(screen.getByText('HTTPS protocol only')).toBeInTheDocument();
+    expect(screen.getByText('https://manikmagar.com.np')).toBeInTheDocument();
+    expect(screen.getByText('https://mnk.manikmagar.com.np')).toBeInTheDocument();
   });
 
-  it('contains NO input field — the browser cannot name a target (§8)', () => {
+  it('contains NO input field — scans are started from the Scans page only', () => {
     const { container } = render(<Targets />);
     expect(container.querySelectorAll('input')).toHaveLength(0);
     expect(container.querySelectorAll('textarea')).toHaveLength(0);

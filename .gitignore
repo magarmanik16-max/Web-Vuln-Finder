@@ -16,7 +16,12 @@ coverage/
 # python
 __pycache__/
 *.pyc
+*.pyo
+.pytest_cache/
 .venv/
+
+# runtime pid files
+*.pid
 
 # OS
 .DS_Store

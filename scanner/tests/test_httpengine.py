@@ -27,6 +27,7 @@ def make_client(conns_responses, **cfg):
     config = ScanConfig(**{"min_request_interval": 0, **cfg})
     return SafeHTTPClient(
         config,
+        origin_host='manikmagar.com.np',
         stop_event=threading.Event(),
         resolver=lambda h: [PUBLIC_IP],
         connection_factory=conn_factory_from(conns_responses),
@@ -133,6 +134,7 @@ class LimitTests(unittest.TestCase):
         flaky = FlakyFactory()
         client = SafeHTTPClient(
             ScanConfig(min_request_interval=0),
+            origin_host='manikmagar.com.np',
             resolver=lambda h: [PUBLIC_IP],
             connection_factory=flaky,
         )
@@ -152,6 +154,7 @@ class LimitTests(unittest.TestCase):
         flaky = FlakyFactory()
         client = SafeHTTPClient(
             ScanConfig(min_request_interval=0),
+            origin_host='manikmagar.com.np',
             resolver=lambda h: [PUBLIC_IP],
             connection_factory=flaky,
         )
@@ -187,13 +190,10 @@ class CancellationAndUrlRulesTests(unittest.TestCase):
         with self.assertRaises(Exception):
             _default_connection_factory("manikmagar.com.np", "127.0.0.1", 0.3)
 
-    def test_probe_requires_allowlisted_host(self):
-        from scanner.authorization import Target
-
+    def test_probe_rejects_out_of_scope_host(self):
         client = make_client([FakeResponse(200, [], b"x")])
-        evil = Target(target_id="EVIL", host="evil.com", url="https://evil.com", type="static")
         with self.assertRaises(UnauthorizedTargetError):
-            client.probe_http_redirect(evil)
+            client.probe_http_redirect("evil.com")
 
 
 if __name__ == "__main__":

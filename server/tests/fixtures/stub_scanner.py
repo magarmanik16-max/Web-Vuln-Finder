@@ -24,8 +24,8 @@ def finding(sev, title):
     from datetime import datetime, timezone
 
     return {
-        "target_id": "STATIC_TARGET",
-        "target_url": "https://manikmagar.com.np",
+        "target_id": "stub.example.test",
+        "target_url": "https://stub.example.test/",
         "url": "https://manikmagar.com.np/",
         "method": "GET",
         "parameter": "",
@@ -54,9 +54,13 @@ def main() -> int:
     mode = os.environ.get("STUB_MODE", "ok")
     output = args.get("output", "")
     scan_id = args.get("scan-id", "unknown")
-    target_id = args.get("target-id", "STATIC_TARGET")
+    target_url = args.get("target-url", "https://stub.example.test/")
 
-    if target_id not in ("STATIC_TARGET", "DYNAMIC_TARGET"):
+    # mirror the real scanner's independent enforcement for unsafe targets
+    from urllib.parse import urlparse
+
+    parts = urlparse(target_url)
+    if parts.scheme != "https" or parts.hostname in ("127.0.0.1", "localhost", "169.254.169.254") or parts.port:
         print("UNAUTHORIZED", file=sys.stderr)
         return 1
 
@@ -83,7 +87,7 @@ def main() -> int:
             output,
             {
                 "scan_id": scan_id,
-                "target": {"id": target_id, "url": "https://manikmagar.com.np"},
+                "target": {"id": "stub.example.test", "url": target_url},
                 "status": "cancelled",
                 "statistics": {"pages_crawled": 1, "requests_made": 5, "forms_found": 0, "endpoints": 0, "findings_by_severity": {"high": 1}},
                 "findings": [finding("high", "Partial finding preserved on cancellation")],
@@ -100,7 +104,7 @@ def main() -> int:
         output,
         {
             "scan_id": scan_id,
-            "target": {"id": target_id, "url": "https://manikmagar.com.np"},
+            "target": {"id": "stub.example.test", "url": target_url},
             "status": "completed",
             "statistics": {"pages_crawled": 2, "requests_made": 8, "forms_found": 1, "endpoints": 3, "findings_by_severity": {"high": 1, "informational": 1}},
             "findings": [finding("high", "Stub high finding"), finding("informational", "Stub informational finding")],

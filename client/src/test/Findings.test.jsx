@@ -36,9 +36,9 @@ describe('Findings page (§9)', () => {
   it('lists findings and shows filter selects', async () => {
     render(<Findings />);
     await waitFor(() => expect(screen.getByText('Missing Content-Security-Policy header')).toBeInTheDocument());
-    // four filters: severity, target, category, confidence (§9)
-    const selects = screen.getAllByRole('combobox');
-    expect(selects.length).toBe(4);
+    // four filters: severity, target, category, confidence (§9) — target is a text input
+    expect(screen.getAllByRole('combobox')).toHaveLength(3);
+    expect(screen.getByPlaceholderText('target host…')).toBeInTheDocument();
   });
 
   it('opens a detail dialog with the full finding contract', async () => {

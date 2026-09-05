@@ -47,8 +47,8 @@ async function apiCall(pathname, { method = 'GET', body, token } = {}) {
   return { status: res.status, data, res };
 }
 
-async function runScanFlow(token, targetId) {
-  const created = await apiCall('/scans', { method: 'POST', body: { targetId }, token });
+async function runScanFlow(token, url) {
+  const created = await apiCall('/scans', { method: 'POST', body: { url }, token });
   assert(created.status === 201, `create scan -> ${created.status}`);
   const scanId = created.data.scan._id;
 
@@ -79,7 +79,7 @@ async function runScanFlow(token, targetId) {
     assert(s[section] !== undefined, `report section missing: ${section}`);
   }
   assert(s.findings.length === findings.data.findings.length, 'report findings do not match stored findings');
-  assert(s.scope.authorizedUrl && s.scope.id === targetId, 'report scope mismatch');
+  assert(s.scope.authorizedUrl && s.scope.authorizedUrl.startsWith('https://'), 'report scope mismatch');
 
   const pdf = await fetch(`${API}/reports/${report.data.report._id}/pdf`, { headers: { Authorization: `Bearer ${token}` } });
   assert(pdf.status === 200, `pdf download -> ${pdf.status}`);
@@ -100,18 +100,23 @@ async function runScanFlow(token, targetId) {
     token = r.data.token;
   });
 
-  for (const targetId of ['STATIC_TARGET', 'DYNAMIC_TARGET']) {
-    await check(`E2E flow for ${targetId} (scan → target → findings → Mongo → report → PDF)`, async () => {
-      const result = await runScanFlow(token, targetId);
+  for (const url of ['https://manikmagar.com.np', 'https://mnk.manikmagar.com.np']) {
+    await check(`E2E flow for ${url} (scan → target → findings → Mongo → report → PDF)`, async () => {
+      const result = await runScanFlow(token, url);
       console.log(`      -> findings=${result.findings} requests=${result.requests} endpoints=${result.endpoints} duration=${Math.round(result.durationMs / 1000)}s report=${result.reportId.slice(-8)}`);
     });
   }
 
-  await check('unauthorized target REJECTED at API boundary', async () => {
-    for (const bad of ['https://example.com', 'http://localhost', 'EVIL_TARGET']) {
-      const r = await apiCall('/scans', { method: 'POST', body: { targetId: bad }, token });
+  await check('unsafe destinations REJECTED at API boundary (SSRF boundary)', async () => {
+    for (const bad of ['http://example.com', 'http://localhost', 'https://127.0.0.1', 'https://192.168.1.1', 'https://169.254.169.254', 'https://example.com:8443', 'https://user:pass@example.com']) {
+      const r = await apiCall('/scans', { method: 'POST', body: { url: bad }, token });
       assert(r.status === 400, `${bad} -> ${r.status}`);
     }
+  });
+
+  await check('one controlled public target (example.com) accepted end-to-end', async () => {
+    const result = await runScanFlow(token, 'https://example.com');
+    console.log(`      -> findings=${result.findings} requests=${result.requests} duration=${Math.round(result.durationMs / 1000)}s`);
   });
 
   await check('dashboard data: totals, active/completed, severity distribution', async () => {
@@ -120,7 +125,7 @@ async function runScanFlow(token, targetId) {
     assert(scans.data.scans.length >= 2, 'scans missing');
     assert(scans.data.scans.every((s) => ['queued', 'running', 'completed', 'failed', 'cancelled'].includes(s.status)), 'bad status');
     assert(findings.data.findings.length >= 1, 'findings missing');
-    assert(findings.data.findings.every((f) => f.severity && f.category && f.targetId), 'finding contract incomplete');
+    assert(findings.data.findings.every((f) => f.severity && f.category && (f.targetHost || f.targetId)), 'finding contract incomplete');
   });
 
   await check('audit log captured the lifecycle (login/create/complete/report)', async () => {

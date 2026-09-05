@@ -1,16 +1,17 @@
-"""Scanner CLI — the Node integration contract (SCANNER.md §24).
+"""Scanner CLI — the Node integration contract.
 
 Usage:
-  python3 -m scanner.main --target-id STATIC_TARGET [--scan-id <id>] [--config cfg.json] [--output out.json]
+  python3 -m scanner.main --target-url https://example.com [--scan-id <id>] [--config cfg.json] [--output out.json]
 
 Contract:
-- target:      ONLY an allowlisted target ID (never a URL) — resolved through
-               scanner.authorization, then re-validated origin+DNS.
+- target:      a PUBLIC HTTPS URL. The engine independently re-enforces the
+               full safety policy (scheme, no port/userinfo, global-unicast
+               DNS, origin-scoped redirects) — it never trusts the caller.
 - scan id:     caller-supplied, echoed in the JSON report.
 - config:      optional JSON file; values are clamped to safe ceilings.
 - cancellation: SIGINT/SIGTERM -> graceful stop, status "cancelled".
 - structured output: the JSON report is printed to stdout; human logs go to stderr.
-- exit codes:  0 completed · 1 unauthorized target · 2 usage error ·
+- exit codes:  0 completed · 1 unsafe target · 2 usage error ·
                3 runtime failure · 4 cancelled.
 """
 
@@ -23,7 +24,7 @@ import threading
 import uuid
 from datetime import datetime, timezone
 
-from .authorization import UnauthorizedTargetError, load_allowlist, resolve_target_id, validate_target_url
+from .authorization import UnauthorizedTargetError, validate_target_url
 from .config import load_config
 from .context import ScanContext
 from .crawler.crawler import Crawler
@@ -49,23 +50,21 @@ def _emit_progress(stage: str, **kwargs) -> None:
     print(f"PROGRESS {_json.dumps(payload)}", file=sys.stderr, flush=True)
 
 
-def run_scan(target_id: str, scan_id: str, config_path: str | None = None, stop_event: threading.Event | None = None) -> tuple:
+def run_scan(target_url: str, scan_id: str, config_path: str | None = None, stop_event: threading.Event | None = None) -> tuple:
     """Programmatic entry point (used by the CLI and unit tests)."""
     stop_event = stop_event or threading.Event()
     config = load_config(config_path)
-    allowlist = load_allowlist()
-    target = resolve_target_id(target_id, allowlist)  # IDs only — never URLs
-    validate_target_url(target.url, allowlist=allowlist)  # origin + DNS re-check
+    target = validate_target_url(target_url)  # independent policy + DNS check
     _emit_progress("check_started", name="authorization")
 
     result = ScanResult(
         scan_id=scan_id,
-        target_id=target.target_id,
-        target_url=target.url,
+        target_id=target.host,
+        target_url=target.target_url,
         status="running",
         started_at=datetime.now(timezone.utc).isoformat(),
     )
-    client = SafeHTTPClient(config, stop_event=stop_event, allowlist=allowlist)
+    client = SafeHTTPClient(config, origin_host=target.host, stop_event=stop_event)
     crawler = Crawler(client, target, config, on_error=_on_error(result))
 
     crawl = crawler.crawl()
@@ -109,8 +108,8 @@ def run_scan(target_id: str, scan_id: str, config_path: str | None = None, stop_
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(prog="scanner", description="Authorized vulnerability scanner (Phase 2)")
-    parser.add_argument("--target-id", required=True, help="STATIC_TARGET or DYNAMIC_TARGET (never a URL)")
+    parser = argparse.ArgumentParser(prog="scanner", description="Authorized vulnerability scanner")
+    parser.add_argument("--target-url", required=True, help="public HTTPS origin to assess (validated again independently)")
     parser.add_argument("--scan-id", default=None, help="caller-supplied scan id (default: generated)")
     parser.add_argument("--config", default=None, help="path to JSON config")
     parser.add_argument("--output", default=None, help="also write the JSON report to this path")
@@ -126,7 +125,7 @@ def main(argv: list[str] | None = None) -> int:
             pass
 
     try:
-        result, _cfg = run_scan(args.target_id, args.scan_id, args.config, stop_event)
+        result, _cfg = run_scan(args.target_url, args.scan_id, args.config, stop_event)
         result.status = "cancelled" if stop_event.is_set() else "completed"
         write_report(build_report(result), args.output)
         return 4 if result.status == "cancelled" else 0

@@ -69,28 +69,27 @@ function assert(cond, msg) {
     assert(r.status === 401, `status ${r.status}`);
   });
 
-  await check('/api/targets lists exactly the two authorized targets', async () => {
+  await check('/api/targets describes the safety policy', async () => {
     const r = await fetch(`${API}/targets`, { headers: { Authorization: `Bearer ${token}` } });
     const b = await r.json();
-    assert(b.targets.length === 2, JSON.stringify(b));
-    assert(b.targets.every((t) => ['STATIC_TARGET', 'DYNAMIC_TARGET'].includes(t.id)), 'unexpected target ids');
+    assert(b.policy && /public HTTPS/i.test(b.policy.statement), JSON.stringify(b).slice(0, 120));
   });
 
-  await check('scan for authorized target accepted', async () => {
+  await check('scan for a public HTTPS target accepted', async () => {
     const r = await fetch(`${API}/scans`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-      body: JSON.stringify({ targetId: 'DYNAMIC_TARGET' }),
+      body: JSON.stringify({ url: 'https://example.com' }),
     });
     assert(r.status === 201, `status ${r.status}`);
   });
 
-  for (const bad of ['https://example.com', 'http://localhost', 'EVIL_TARGET']) {
-    await check(`scan for "${bad}" rejected (400)`, async () => {
+  for (const bad of ['http://example.com', 'http://localhost', 'https://127.0.0.1', 'https://example.com:8443', 'https://user:pass@example.com']) {
+    await check(`scan for unsafe "${bad}" rejected (400)`, async () => {
       const r = await fetch(`${API}/scans`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-        body: JSON.stringify({ targetId: bad }),
+        body: JSON.stringify({ url: bad }),
       });
       assert(r.status === 400, `status ${r.status}`);
     });

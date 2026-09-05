@@ -13,7 +13,7 @@ const PDFDocument = require('pdfkit');
 
 const Scan = require('../models/Scan');
 const Finding = require('../models/Finding');
-const { resolveTarget, toPublicTarget } = require('../config/targets');
+const { targetInfo } = require('../config/targets');
 
 const REPORTS_DIR = process.env.REPORTS_DIR || path.join(__dirname, '..', '..', '.data', 'reports');
 
@@ -59,7 +59,7 @@ async function buildSections(scanId, user) {
     err.statusCode = 404;
     throw err;
   }
-  const target = resolveTarget(scan.targetId);
+  const target = targetInfo(scan);
   const findings = await Finding.find({ scan: scan._id }).sort({ severity: 1, createdAt: -1 }).lean();
 
   const counts = _counts(findings);
@@ -83,8 +83,12 @@ async function buildSections(scanId, user) {
     generatedFor: user ? user.email : '',
     executiveSummary,
     scope: {
-      ...toPublicTarget(target || { id: scan.targetId, host: scan.targetId, type: 'unknown', description: '', authorizedUrl: '' }),
-      assessmentType: 'Automated non-destructive vulnerability assessment',
+      id: target.host,
+      label: target.label,
+      host: target.host,
+      authorizedUrl: target.url,
+      assessmentType: 'Automated non-destructive vulnerability assessment of the supplied target',
+      scopeNote: 'Assessment coverage is bounded: same-origin crawling with depth, request and rate limits; unauthenticated checks only.',
     },
     methodology: METHODOLOGY,
     riskSummary: {

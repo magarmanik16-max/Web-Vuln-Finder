@@ -9,7 +9,7 @@
  */
 process.env.NODE_ENV = 'test';
 process.env.JWT_SECRET = process.env.JWT_SECRET || 'test-only-secret-do-not-use-in-production-0123456789';
-process.env.MONGODB_URI = process.env.MONGODB_URI || 'mongodb://127.0.0.1:27017/webvulnapp_test';
+process.env.MONGODB_URI = process.env.MONGODB_URI || 'mongodb://127.0.0.1:27017/webvulnapp_test_int';
 process.env.SCANNER_PYTHON = 'python3';
 process.env.SCANNER_ARGS = '-m stub_scanner';
 process.env.SCANNER_CWD = __dirname + '/fixtures';
@@ -23,6 +23,15 @@ const mongoose = require('mongoose');
 const fs = require('fs');
 const bcrypt = require('bcryptjs');
 const { buildApp } = require('../src/app');
+const urlGuard = require('../src/security/urlGuard');
+
+// Hermetic: DNS stage mocked; structural validation stays real. The stub
+// scanner accepts any https:// URL, so tests use stub.example.test.
+let dnsSpy;
+beforeAll(() => {
+  dnsSpy = jest.spyOn(urlGuard, 'validateTargetUrl').mockImplementation(async (u) => urlGuard.normalizeTargetUrl(u));
+});
+afterAll(() => dnsSpy.mockRestore());
 const User = require('../src/models/User');
 const Scan = require('../src/models/Scan');
 const Finding = require('../src/models/Finding');
@@ -62,12 +71,14 @@ beforeAll(async () => {
 });
 
 afterAll(async () => {
+  const failed = await mongoose.connection.db.collection('scans').find({ status: 'failed' }).toArray();
+  for (const s of failed) console.log('DEBUG failed scan:', s.targetUrl, '| err:', s.error);
   await mongoose.connection.dropDatabase();
   await mongoose.connection.close();
 });
 
-async function startScan(targetId = 'STATIC_TARGET') {
-  const res = await request(app).post('/api/scans').set('Authorization', `Bearer ${token}`).send({ targetId });
+async function startScan(url = 'https://stub.example.test/') {
+  const res = await request(app).post('/api/scans').set('Authorization', `Bearer ${token}`).send({ url });
   expect(res.status).toBe(201);
   return res.body.scan._id;
 }
@@ -75,13 +86,15 @@ async function startScan(targetId = 'STATIC_TARGET') {
 describe('scan lifecycle via real child process', () => {
   test('completed scan: findings stored, status/summary/progress populated', async () => {
     process.env.STUB_MODE = 'ok';
-    const scanId = await startScan();
+    const scanId = await startScan('https://stub.example.test/');
 
     const finished = await waitFor(async () => {
       const r = await request(app).get(`/api/scans/${scanId}`).set('Authorization', `Bearer ${token}`);
       return ['completed', 'failed'].includes(r.body.scan.status) ? r.body.scan : null;
     });
     expect(finished.status).toBe('completed');
+    expect(finished.targetUrl).toBe('https://stub.example.test/');
+    expect(finished.targetHost).toBe('stub.example.test');
     expect(finished.summary.high).toBe(1);
     expect(finished.summary.info).toBe(1);
     expect(finished.progress.requests).toBe(8);
@@ -111,7 +124,8 @@ describe('scan lifecycle via real child process', () => {
     const scanId = await startScan();
     const running = await waitFor(async () => {
       const r = await request(app).get(`/api/scans/${scanId}`).set('Authorization', `Bearer ${token}`);
-      return r.body.scan.status === 'running' ? r.body.scan : null;
+      const s = r.body.scan;
+      return s.status === 'running' && s.progress?.currentModule === 'xss' ? s : null;
     });
     expect(running.progress.currentModule).toBeTruthy();
 
@@ -160,7 +174,7 @@ describe('scan lifecycle via real child process', () => {
 describe('findings API filters (§9)', () => {
   beforeAll(async () => {
     process.env.STUB_MODE = 'ok';
-    const scanId = await startScan('DYNAMIC_TARGET');
+    const scanId = await startScan('https://stub-dynamic.example.test/');
     await waitFor(async () => {
       const r = await request(app).get(`/api/scans/${scanId}`).set('Authorization', `Bearer ${token}`);
       return ['completed', 'failed'].includes(r.body.scan.status);
@@ -176,9 +190,9 @@ describe('findings API filters (§9)', () => {
   });
 
   test('filter by target', async () => {
-    const res = await request(app).get('/api/findings?targetId=DYNAMIC_TARGET').set('Authorization', `Bearer ${token}`);
+    const res = await request(app).get('/api/findings?target=stub-dynamic.example.test').set('Authorization', `Bearer ${token}`);
     expect(res.body.findings.length).toBeGreaterThanOrEqual(1);
-    expect(res.body.findings.every((f) => f.targetId === 'DYNAMIC_TARGET')).toBe(true);
+    expect(res.body.findings.every((f) => f.targetHost === 'stub-dynamic.example.test')).toBe(true);
   });
 
   test('filter by category and confidence', async () => {
@@ -209,7 +223,7 @@ describe('reports (§10-§12): generated from stored data only', () => {
 
   beforeAll(async () => {
     process.env.STUB_MODE = 'ok';
-    completedScanId = await startScan();
+    completedScanId = await startScan('https://stub.example.test/');
     await waitFor(async () => {
       const r = await request(app).get(`/api/scans/${completedScanId}`).set('Authorization', `Bearer ${token}`);
       return ['completed', 'failed'].includes(r.body.scan.status);
@@ -230,11 +244,11 @@ describe('reports (§10-§12): generated from stored data only', () => {
     const stored = await request(app).get(`/api/findings?scanId=${completedScanId}`).set('Authorization', `Bearer ${token}`);
     expect(s.findings).toHaveLength(stored.body.findings.length);
     expect(s.riskSummary.counts.high).toBe(stored.body.findings.filter((f) => f.severity === 'high').length);
-    expect(s.scope.authorizedUrl).toBe('https://manikmagar.com.np');
+    expect(s.scope.authorizedUrl).toBe('https://stub.example.test/');
   });
 
   test('report for running/queued scan -> 409', async () => {
-    const scan = await Scan.create({ targetId: 'STATIC_TARGET', requestedBy: new mongoose.Types.ObjectId(), status: 'running' });
+    const scan = await Scan.create({ targetUrl: 'https://stub.example.test/', targetHost: 'stub.example.test', requestedBy: new mongoose.Types.ObjectId(), status: 'running' });
     const res = await request(app).post('/api/reports').set('Authorization', `Bearer ${token}`).send({ scanId: String(scan._id) });
     expect(res.status).toBe(409);
   });

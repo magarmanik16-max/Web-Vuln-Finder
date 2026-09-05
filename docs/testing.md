@@ -24,11 +24,13 @@ node tests/e2e-phase3.mjs                   # full E2E; authorized targets only
 
 ## Coverage highlights
 
-- **Authorization boundary** (the critical suite): exact-host allowlist, scheme/
-  port/userinfo/path rules, IP literals in every notation, localhost, cloud
-  metadata, IPv4-mapped IPv6, DNS rebinding answers, unauthorized redirects —
-  tested independently in Node (`urlguard.test.js`) and Python
-  (`test_authorization*.py`, `test_bypass_attempts.py`).
+- **Authorization boundary** (the critical suite): the target safety policy —
+  scheme/port/userinfo rules, IP literals in every notation (decimal, hex,
+  octal, abbreviated IPv4-mapped), localhost, cloud metadata, private ranges,
+  DNS answers resolving to private IPs, mixed/rebinding answer sets,
+  origin-scoped redirects and crawler escapes — tested independently in Node
+  (`urlguard.test.js`) and Python (`test_authorization.py`,
+  `test_bypass_attempts.py`).
 - **API security**: authentication, roles, target-ID enforcement, audit trail,
   CORS headers, JWT expiry/forgery, rate limiting, ID format validation.
 - **Integration**: Node→Python spawn with a stub scanner sharing the real CLI
@@ -42,7 +44,7 @@ node tests/e2e-phase3.mjs                   # full E2E; authorized targets only
 
 - Tests never hit live websites: unit/integration tests use injected resolvers,
   canned connections, and a stub scanner process.
-- Live assessments run only against the two authorized targets and only through
-  the conservative defaults.
+- Live assessments run only against consented targets (the project owner's two
+  domains and `example.com`) and only through the conservative defaults.
 - A bug fix must come with a regression test in the suite that caught it (or a
   new one) — this was enforced throughout the project.

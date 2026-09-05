@@ -1,16 +1,14 @@
 # WebVulnApp — Authorized Web Vulnerability Assessment & Reporting Platform
 
-Final-year cybersecurity project. The platform assesses **exactly two targets**
-(the project owner's own assets) and nothing else:
+Final-year cybersecurity project. A **general-purpose authorized assessment
+tool**: an authenticated user submits any **public HTTPS origin** to assess,
+and the platform enforces a strict URL/network safety boundary — private,
+loopback, link-local, multicast, reserved and otherwise non-global
+destinations are rejected; DNS resolutions and every redirect are
+independently validated; connections are pinned to validated IPs.
 
-| ID | Host | Type |
-|---|---|---|
-| `STATIC_TARGET` | manikmagar.com.np | Static |
-| `DYNAMIC_TARGET` | mnk.manikmagar.com.np | Dynamic |
-
-The allowlist is **architectural**: the browser can never submit a URL — only a
-target ID — and both the Node layer and the Python scanner independently
-re-enforce the same restriction. See [docs/security.md](docs/security.md).
+Both the Node layer and the Python scanner independently re-enforce the same
+safety policy. See [docs/security.md](docs/security.md).
 
 ## Architecture
 
@@ -130,10 +128,10 @@ node tests/e2e-phase3.mjs     # full E2E: both targets, live scans, reports, PDF
 | `POST /api/auth/logout` | ✓ | Revokes the presented token |
 | `GET /api/auth/me` | ✓ | Current user |
 | `GET /api/targets` | ✓ | The immutable allowlist (read-only, no mutations exist) |
-| `POST /api/scans` | ✓ | Body: `{ "targetId": "STATIC_TARGET" \| "DYNAMIC_TARGET" }` — **URLs are rejected**; spawns the Python scanner (bounded concurrency + FIFO queue) |
+| `POST /api/scans` | ✓ | Body: `{ "url": "https://example.com" }` — any public HTTPS origin (legacy `targetId` still accepted); validated server-side before launch; bounded concurrency + FIFO queue + per-user cap |
 | `GET /api/scans` · `GET /api/scans/:id` | ✓ | History / detail incl. live progress (module checklist, requests, pages, endpoints) |
 | `POST /api/scans/:id/cancel` | ✓ | SIGTERM → graceful stop, partial findings preserved |
-| `GET /api/findings` · `GET /api/findings/:id` | ✓ | Filters: severity, target, category, confidence, scan |
+| `GET /api/findings` · `GET /api/findings/:id` | ✓ | Filters: severity, target (host or legacy id), category, confidence, scan |
 | `POST /api/reports` | ✓ | `{ "scanId": "…" }` — builds the report strictly from stored scan results |
 | `GET /api/reports` · `GET /api/reports/:id` | ✓ | List / full structured report |
 | `GET /api/reports/:id/pdf` | ✓ | PDF download (pdfkit) |

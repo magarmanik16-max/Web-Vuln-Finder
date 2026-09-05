@@ -29,9 +29,9 @@ Standard library only — no pip packages required.
 
 ```bash
 cd scanner
-python3 -m unittest discover -s tests -v          # 120 tests, fully offline
+python3 -m unittest discover -s tests -v          # 128 tests, fully offline
 
-python3 -m scanner.main --target-id STATIC_TARGET \
+python3 -m scanner.main --target-url https://example.com \
     [--scan-id <id>] [--config cfg.json] [--output report.json]
 ```
 
@@ -42,7 +42,7 @@ terminal text); human logs go to stderr.
 
 | Aspect | Contract |
 |---|---|
-| target | `--target-id STATIC_TARGET\|DYNAMIC_TARGET` only — URLs are never accepted |
+| target | `--target-url <public HTTPS origin>` — the engine independently re-enforces the full safety policy (it never trusts the caller) |
 | scan id | `--scan-id`, echoed in the report |
 | config | `--config cfg.json`; every value clamped to safe ceilings |
 | cancellation | `SIGINT`/`SIGTERM` → graceful stop, `"status": "cancelled"` |
@@ -74,12 +74,12 @@ findings carry Medium/Low confidence. Confidence (`low/medium/high`) is
 independent of severity. Findings deduplicate by fingerprint
 (category+title+origin path+method+parameter).
 
-## Phase 2 live verification (controlled, conservative defaults)
+## Live verification (controlled, conservative defaults)
 
 | Target | Result |
 |---|---|
-| STATIC_TARGET (manikmagar.com.np) | completed, exit 0 — 10 requests, 1 page (homepage links are external only), 9 findings (1 Medium: missing CSP; 3 Low; 5 Informational), 0 errors |
-| DYNAMIC_TARGET (mnk.manikmagar.com.np) | completed, exit 0 — 10 requests, 1 page, 3 Informational findings, 0 errors |
-| EVIL_TARGET via CLI | rejected, exit 1 |
+| manikmagar.com.np | completed, exit 0 — 10 requests, 1 page (homepage links are external only), 9 findings (1 Medium: missing CSP; 3 Low; 5 Informational), 0 errors |
+| mnk.manikmagar.com.np | completed, exit 0 — 10 requests, 1 page, 3 Informational findings, 0 errors |
+| http://localhost / https://192.168.1.1 via CLI | rejected, exit 1 |
 
 Scan artifacts: `.data/scan-static.json`, `.data/scan-dynamic.json` (gitignored).

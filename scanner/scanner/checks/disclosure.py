@@ -56,8 +56,8 @@ def run(ctx) -> list:
             if value and (not pattern or re.search(pattern, value)):
                 findings.append(
                     make_finding(
-                        target_id=ctx.target.target_id,
-                        target_url=ctx.target.url,
+                        target_id=ctx.target.host,
+                        target_url=ctx.target.target_url,
                         url=page.url,
                         method="GET",
                         title=f"{title}: '{value[:80]}'",
@@ -78,8 +78,8 @@ def run(ctx) -> list:
             if m:
                 findings.append(
                     make_finding(
-                        target_id=ctx.target.target_id,
-                        target_url=ctx.target.url,
+                        target_id=ctx.target.host,
+                        target_url=ctx.target.target_url,
                         url=page.url,
                         method="GET",
                         title=title,
@@ -97,7 +97,7 @@ def run(ctx) -> list:
                 )
 
     for path, indicator, title, sev, cwe in PROBES:
-        url = ctx.target.url.rstrip("/") + path
+        url = ctx.target.target_url.rstrip("/") + path
         try:
             resp = ctx.client.request("GET", url, follow_redirects=False)
         except Exception:
@@ -105,8 +105,8 @@ def run(ctx) -> list:
         if resp.status == 200 and indicator.search(resp.body[:4096]):
             findings.append(
                 make_finding(
-                    target_id=ctx.target.target_id,
-                    target_url=ctx.target.url,
+                    target_id=ctx.target.host,
+                    target_url=ctx.target.target_url,
                     url=url,
                     method="GET",
                     title=title,

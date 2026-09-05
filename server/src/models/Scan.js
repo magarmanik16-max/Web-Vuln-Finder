@@ -1,13 +1,16 @@
 const mongoose = require('mongoose');
-const { TARGET_IDS } = require('../config/targets');
 
 const SCAN_STATUSES = ['queued', 'running', 'completed', 'failed', 'cancelled'];
 const CHECK_MODULES = ['authorization', 'connectivity', 'crawl', 'headers', 'tls', 'cookies', 'cors', 'methods', 'disclosure', 'xss', 'sqli', 'csrf'];
 
 const scanSchema = new mongoose.Schema(
   {
-    // Always an ID from the immutable allowlist — never a URL.
-    targetId: { type: String, enum: TARGET_IDS, required: true },
+    // Target identity. New scans store the validated, normalized origin URL
+    // (targetUrl + targetHost). Legacy scans (pre general-target support) only
+    // have targetId — STATIC_TARGET / DYNAMIC_TARGET — kept for compatibility.
+    targetId: { type: String, default: null, index: true },
+    targetUrl: { type: String, default: null },
+    targetHost: { type: String, default: null, index: true },
     requestedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
     status: { type: String, enum: SCAN_STATUSES, default: 'queued', index: true },
     summary: {

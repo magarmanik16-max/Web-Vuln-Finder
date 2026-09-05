@@ -8,11 +8,12 @@ input to a network destination.** This document defines the design that Phase 2
 
 | Wall | Location | Mechanism |
 |---|---|---|
-| W1: API boundary | `server` routes/controllers | `targetId` must be a member of the closed enum in `config/targets.js`. Unknown → `400` + audit `scan.target.rejected (denied)`. **URLs are not an accepted input format anywhere.** |
-| W2: Scan-service guard | `server/src/security/urlGuard.js` | Full URL validation used by the scan service before any dispatch (defense-in-depth; also the reference implementation of the rules). |
-| W3: Scanner self-check | `scanner/scanner/authorization.py` | The Python engine independently re-validates every destination. It runs with its own allowlist copy; W2/W3 are deliberately redundant. |
+| W1: API boundary | `server` routes/controllers | The submitted `url` is normalized and validated (structure + DNS) **before** a scan row is created or the scanner is launched. Unsafe → `400` + audit `scan.target.rejected (denied)` with a deliberately terse client-facing message. |
+| W2: Scan-service guard | `server/src/security/urlGuard.js` | The Scan Manager re-validates the target immediately before spawning the scanner, and `authorizeRequestUrl` scopes every redirect hop to the scanned origin. |
+| W3: Scanner self-check | `scanner/scanner/authorization.py` | The Python engine independently re-implements the full policy and re-validates the target (structure + DNS) before its first request. |
 
-A target is assessable only if it passes **all three** walls.
+A destination is assessable only if it passes **all three** walls. A malicious
+or buggy Node layer cannot make Python scan an unsafe target, and vice versa.
 
 ## 2. URL validation rules (W2/W3 — identical semantics)
 
@@ -43,21 +44,28 @@ A target is assessable only if it passes **all three** walls.
 6. **No DNS for unauthorized names** — the allowlist gate runs first, so
    attacker-controlled names are never resolved (no DNS-exfil side channel).
 
-## 3. Redirect policy
+## 3. Redirect & crawler scope policy
 
-Every redirect hop must re-validate to the **same** authorized target
+Every redirect hop must re-validate and stay on the **scanned origin**
 (`assertAuthorizedRedirect`): HTTPS→HTTPS, same exact host. Any downgrade,
-cross-target hop, subdomain hop, or IP hop is rejected. The Phase 2 HTTP client
-MUST use manual redirect handling and call this check per hop — it must never
-use "follow redirects" primitives. This also mitigates DNS rebinding between
-hops.
+cross-site hop, subdomain hop, or IP hop is rejected — a redirect away from
+the origin leaves the authorized scope. The HTTP client uses manual redirect
+handling and calls this check per hop; it never uses "follow redirects"
+primitives. This also mitigates DNS rebinding between hops.
+
+The crawler is likewise same-origin only: candidate links are authorized with
+`authorizeRequestUrl(url, originHost)` before being queued, so a page on the
+target cannot redirect or link the crawler onto third-party or internal
+systems. Crawl depth/page/request/rate limits are unchanged.
 
 ## 4. Residual risks & Phase 2 obligations
 
-- **TOCTOU / rebinding between validation and connection**: Phase 2's HTTP
-  client must connect to a DNS answer that was validated in the same request
-  (validate-then-connect on the returned addresses, or re-validate per hop).
-  Optional hardening: DNS answer pinning + reverse-confirmation.
+- **TOCTOU / rebinding between validation and connection**: the HTTP engine
+  resolves the host per request, validates every answer as globally routable,
+  and PINS the TLS connection to a validated IP (validate-then-connect).
+  Each redirect hop re-resolves and re-validates. Residual risk: a DNS server
+  with multiple answers that rotate between checks is bounded by per-request
+  re-validation; a same-IP answer set is pinned.
 - **End-to-end request enforcement**: the Python engine must never open sockets
   to raw IPs or user-passed hosts; only `Target.url` (or same-origin subpaths of
   it) may be requested.

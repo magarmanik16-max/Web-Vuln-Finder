@@ -1,5 +1,11 @@
 # Phase 1 Report — Project Foundation
 
+> NOTE: historical phase record. The target model later changed to
+> user-supplied public HTTPS origins with the same SSRF safety boundary —
+> see docs/security.md. Statements below about the two-domain allowlist
+> describe the platform as it was at the end of this phase.
+
+
 Status: **COMPLETE** (all Definition-of-Done items satisfied — see checklist at
 the end). Phase 2 (Python scanner engine) has NOT been started.
 
