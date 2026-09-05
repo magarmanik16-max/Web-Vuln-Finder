@@ -40,6 +40,15 @@ def _on_error(result):
     return handler
 
 
+def _emit_progress(stage: str, **kwargs) -> None:
+    """Live progress for the Node Scan Manager: `PROGRESS {json}` on stderr."""
+    import json as _json
+    import time as _time
+
+    payload = {"stage": stage, "ts": _time.time(), **kwargs}
+    print(f"PROGRESS {_json.dumps(payload)}", file=sys.stderr, flush=True)
+
+
 def run_scan(target_id: str, scan_id: str, config_path: str | None = None, stop_event: threading.Event | None = None) -> tuple:
     """Programmatic entry point (used by the CLI and unit tests)."""
     stop_event = stop_event or threading.Event()
@@ -47,6 +56,7 @@ def run_scan(target_id: str, scan_id: str, config_path: str | None = None, stop_
     allowlist = load_allowlist()
     target = resolve_target_id(target_id, allowlist)  # IDs only — never URLs
     validate_target_url(target.url, allowlist=allowlist)  # origin + DNS re-check
+    _emit_progress("check_started", name="authorization")
 
     result = ScanResult(
         scan_id=scan_id,
@@ -59,14 +69,26 @@ def run_scan(target_id: str, scan_id: str, config_path: str | None = None, stop_
     crawler = Crawler(client, target, config, on_error=_on_error(result))
 
     crawl = crawler.crawl()
+    if crawl.pages:
+        _emit_progress("check_done", name="connectivity")
+    _emit_progress(
+        "check_done",
+        name="crawl",
+        pages=len(crawl.pages),
+        endpoints=len(crawl.parameter_urls) + len(crawl.api_endpoints),
+        requests=client.requests_made,
+        modules_done=["authorization", "connectivity", "crawl"],
+    )
     ctx = ScanContext(target=target, config=config, client=client, crawl=crawl, result=result)
 
+    done = ["authorization", "connectivity", "crawl"]
     for name in config.enabled_checks:
         if stop_event.is_set():
             break
         module = CHECKS.get(name)
         if module is None:
             continue
+        _emit_progress("check_started", name=name, requests=client.requests_made, findings=len(result.findings), modules_done=list(done), modules_running=[name])
         try:
             for finding in module.run(ctx):
                 result.add_finding(finding)
@@ -74,8 +96,15 @@ def run_scan(target_id: str, scan_id: str, config_path: str | None = None, stop_
             raise
         except Exception as e:  # one broken check must not kill the scan
             result.add_error(f"check.{name}", f"{type(e).__name__}: {e}")
+        done.append(name)
+        _emit_progress("check_done", name=name, requests=client.requests_made, findings=len(result.findings), modules_done=list(done))
 
-    result.statistics = {"pages_crawled": len(crawl.pages), "requests_made": client.requests_made, "forms_found": len(crawl.forms)}
+    result.statistics = {
+        "pages_crawled": len(crawl.pages),
+        "requests_made": client.requests_made,
+        "forms_found": len(crawl.forms),
+        "endpoints": len(crawl.parameter_urls) + len(crawl.api_endpoints),
+    }
     return result, config
 
 

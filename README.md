@@ -30,10 +30,10 @@ Results:  Python Scanner → Express → MongoDB → React Dashboard
 
 ```
 client/    React + Vite + Tailwind dashboard (no target-URL input exists)
-server/    Express API, Mongoose models, security middleware, tests/
-scanner/   Python authorization interface (scanning engine = Phase 2)
-docs/      ARCHITECTURE.md · SECURITY-DESIGN.md · PHASE1.md
-tests/     tests/smoke.mjs — E2E smoke against the running stack
+server/    Express API, Scan Manager (Python orchestration), Mongoose models, tests/
+scanner/   Python vulnerability scanner (auth engine, crawler, 9 checks, JSON reports)
+docs/      ARCHITECTURE.md · SECURITY-DESIGN.md · PHASE1.md · PHASE2.md · PHASE3.md
+tests/     tests/smoke.mjs + tests/e2e-phase3.mjs — E2E against the running stack
 ```
 
 ## Setup
@@ -88,13 +88,14 @@ credentials you put in `server/.env` (`ADMIN_EMAIL` / `ADMIN_PASSWORD`).
 ### 4. Tests
 
 ```bash
-npm test:server               # from repo root: npm run test:server
-                              # or: cd server && npm test   (97 tests, needs mongod running)
-npm run test:scanner          # 14 offline Python tests (no network)
-npm run smoke                 # E2E against the running stack (mongod + API + client)
+npm run test:server           # 112 server tests (needs mongod running)
+npm run test:scanner          # 120 offline Python tests (no network)
+npm run test:client           # 7 frontend component tests (vitest)
+npm run smoke                 # E2E smoke against the running stack
+node tests/e2e-phase3.mjs     # full E2E: both targets, live scans, reports, PDF
 ```
 
-## API surface (Phase 1)
+## API surface (Phase 3)
 
 | Method & path | Auth | Purpose |
 |---|---|---|
@@ -104,11 +105,13 @@ npm run smoke                 # E2E against the running stack (mongod + API + cl
 | `POST /api/auth/logout` | ✓ | Revokes the presented token |
 | `GET /api/auth/me` | ✓ | Current user |
 | `GET /api/targets` | ✓ | The immutable allowlist (read-only, no mutations exist) |
-| `POST /api/scans` | ✓ | Body: `{ "targetId": "STATIC_TARGET" \| "DYNAMIC_TARGET" }` — **URLs are rejected** |
-| `GET /api/scans` · `GET /api/scans/:id` | ✓ | History / detail |
-| `POST /api/scans/:id/cancel` | ✓ | Cancels queued/running scans |
-| `GET /api/findings` · `GET /api/findings/:id` | ✓ | Findings (populated by the Phase 2 scanner) |
-| `GET /api/reports` | ✓ | Report pipeline placeholder (generation = later phase) |
+| `POST /api/scans` | ✓ | Body: `{ "targetId": "STATIC_TARGET" \| "DYNAMIC_TARGET" }` — **URLs are rejected**; spawns the Python scanner (bounded concurrency + FIFO queue) |
+| `GET /api/scans` · `GET /api/scans/:id` | ✓ | History / detail incl. live progress (module checklist, requests, pages, endpoints) |
+| `POST /api/scans/:id/cancel` | ✓ | SIGTERM → graceful stop, partial findings preserved |
+| `GET /api/findings` · `GET /api/findings/:id` | ✓ | Filters: severity, target, category, confidence, scan |
+| `POST /api/reports` | ✓ | `{ "scanId": "…" }` — builds the report strictly from stored scan results |
+| `GET /api/reports` · `GET /api/reports/:id` | ✓ | List / full structured report |
+| `GET /api/reports/:id/pdf` | ✓ | PDF download (pdfkit) |
 
 ## Security summary
 

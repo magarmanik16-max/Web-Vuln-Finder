@@ -6,6 +6,13 @@
 process.env.NODE_ENV = 'test';
 process.env.JWT_SECRET = process.env.JWT_SECRET || 'test-only-secret-do-not-use-in-production-0123456789';
 process.env.MONGODB_URI = process.env.MONGODB_URI || 'mongodb://127.0.0.1:27017/webvulnapp_test';
+// Phase 3: POST /api/scans spawns the real Scan Manager; point it at the
+// offline stub scanner so tests never touch the network.
+process.env.SCANNER_PYTHON = 'python3';
+process.env.SCANNER_ARGS = '-m stub_scanner';
+process.env.SCANNER_CWD = __dirname + '/fixtures';
+process.env.SCAN_DATA_DIR = __dirname + '/../../.data/test-scans';
+delete process.env.STUB_MODE;
 
 const request = require('supertest');
 const mongoose = require('mongoose');
@@ -117,7 +124,8 @@ describe('scan creation: the API accepts target IDs, never URLs', () => {
       const res = await request(app).post('/api/scans').set('Authorization', `Bearer ${analystToken}`).send({ targetId });
       expect(res.status).toBe(201);
       expect(res.body.scan.targetId).toBe(targetId);
-      expect(res.body.scan.status).toBe('queued');
+      // Scan Manager may already be running the scan by response time
+      expect(['queued', 'running', 'completed']).toContain(res.body.scan.status);
     }
   });
 
@@ -153,6 +161,7 @@ describe('scan creation: the API accepts target IDs, never URLs', () => {
   });
 
   test('scan list/detail/cancel flow', async () => {
+    process.env.STUB_MODE = 'cancelled'; // keep the scan running long enough to cancel
     const create = await request(app).post('/api/scans').set('Authorization', `Bearer ${analystToken}`).send({ targetId: 'STATIC_TARGET' });
     const id = create.body.scan._id;
 
@@ -165,11 +174,21 @@ describe('scan creation: the API accepts target IDs, never URLs', () => {
 
     const cancel = await request(app).post(`/api/scans/${id}/cancel`).set('Authorization', `Bearer ${analystToken}`);
     expect(cancel.status).toBe(200);
-    expect(cancel.body.scan.status).toBe('cancelled');
+    expect(['running', 'cancelled']).toContain(cancel.body.scan.status); // finalize is async after SIGTERM
+
+    // eventually reaches cancelled with partial findings preserved
+    for (let i = 0; i < 40; i++) {
+      const s = await request(app).get(`/api/scans/${id}`).set('Authorization', `Bearer ${analystToken}`);
+      if (s.body.scan.status === 'cancelled') break;
+      await new Promise((r) => setTimeout(r, 250));
+    }
+    const final = await request(app).get(`/api/scans/${id}`).set('Authorization', `Bearer ${analystToken}`);
+    expect(final.body.scan.status).toBe('cancelled');
 
     const again = await request(app).post(`/api/scans/${id}/cancel`).set('Authorization', `Bearer ${analystToken}`);
     expect(again.status).toBe(409);
-  });
+    delete process.env.STUB_MODE;
+  }, 30000);
 
   test('all /api/scans and /api/findings routes require auth', async () => {
     expect((await request(app).get('/api/scans')).status).toBe(401);

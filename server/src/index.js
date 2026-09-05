@@ -2,9 +2,11 @@ const mongoose = require('mongoose');
 const env = require('./config/env');
 const { connectDB } = require('./config/db');
 const { buildApp } = require('./app');
+const scanManager = require('./services/scanManager');
 
 async function main() {
   await connectDB();
+  await scanManager.recoverOrphans(); // scans from a previous process cannot still be running
   const app = buildApp();
   const server = app.listen(env.port, () => {
     console.log(`[api] listening on http://localhost:${env.port} (${env.nodeEnv})`);

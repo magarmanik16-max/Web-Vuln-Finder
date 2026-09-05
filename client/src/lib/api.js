@@ -44,9 +44,27 @@ export const api = {
   me: () => request('/auth/me'),
   targets: () => request('/targets'),
   scans: (params = '') => request(`/scans${params}`),
+  scan: (id) => request(`/scans/${id}`),
   createScan: (targetId) => request('/scans', { method: 'POST', body: { targetId } }),
   cancelScan: (id) => request(`/scans/${id}/cancel`, { method: 'POST' }),
   findings: (params = '') => request(`/findings${params}`),
-  reports: () => request('/reports'),
+  finding: (id) => request(`/findings/${id}`),
+  reports: (params = '') => request(`/reports${params}`),
+  report: (id) => request(`/reports/${id}`),
+  generateReport: (scanId) => request('/reports', { method: 'POST', body: { scanId } }),
+  /** Download the PDF via authenticated fetch and trigger a browser save. */
+  downloadReportPdf: async (id) => {
+    const res = await fetch(`${BASE}/reports/${id}/pdf`, { headers: { Authorization: `Bearer ${getToken()}` } });
+    if (!res.ok) throw new Error(`Download failed (${res.status})`);
+    const blob = await res.blob();
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `assessment-report-${id}.pdf`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+  },
   health: () => fetch(`${BASE}/health`).then((r) => r.json()),
 };

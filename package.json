@@ -8,6 +8,7 @@
     "dev:client": "npm --prefix client run dev",
     "seed": "npm --prefix server run seed",
     "test:server": "npm --prefix server test",
+    "test:client": "npm --prefix client test",
     "test:scanner": "cd scanner && python3 -m unittest discover -s tests -v",
     "smoke": "node tests/smoke.mjs"
   }

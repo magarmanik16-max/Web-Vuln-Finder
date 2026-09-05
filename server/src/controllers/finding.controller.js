@@ -10,6 +10,8 @@ async function listFindings(req, res, next) {
       filter.targetId = req.query.targetId;
     }
     if (req.query.severity && Finding.SEVERITIES.includes(req.query.severity)) filter.severity = req.query.severity;
+    if (req.query.confidence && Finding.CONFIDENCES.includes(req.query.confidence)) filter.confidence = req.query.confidence;
+    if (req.query.category && /^[\w-]{1,40}$/.test(req.query.category)) filter.category = req.query.category;
     if (req.query.status && Finding.STATUSES.includes(req.query.status)) filter.status = req.query.status;
 
     const limit = Math.min(parseInt(req.query.limit || '100', 10) || 100, 500);
@@ -22,7 +24,8 @@ async function listFindings(req, res, next) {
 
 async function getFinding(req, res, next) {
   try {
-    const finding = await Finding.findById(req.params.id);
+    if (!/^[a-f\d]{24}$/i.test(req.params.id)) return res.status(400).json({ error: 'Invalid finding id' });
+    const finding = await Finding.findById(req.params.id).populate('scan', 'status targetId');
     if (!finding) return res.status(404).json({ error: 'Finding not found' });
     res.json({ finding });
   } catch (err) {
