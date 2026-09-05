@@ -127,3 +127,57 @@ def assert_authorized_redirect(current: Target, location_url) -> Target:
     if nxt.target_id != current.target_id:
         raise UnauthorizedTargetError("unauthorized_redirect")
     return nxt
+
+
+# --------------------------------------------------------------------------
+# Scanner-grade primitives (Phase 2). The crawler and HTTP engine must request
+# deep paths (e.g. /blog/post-1) on the authorized ORIGIN, so beyond the
+# origin-level checks above they use the following two functions:
+#   - authorize_request_url(): exact-host allowlist + https + no port/userinfo,
+#     but any path/query — the path is always on the authorized origin.
+#   - resolve_and_validate_ips(): DNS answers for an authorized host, all of
+#     which must be global unicast. The HTTP engine PINS the connection to one
+#     of these validated IPs (validate-then-connect, see docs/SECURITY-DESIGN.md).
+# --------------------------------------------------------------------------
+
+
+def authorize_request_url(raw_url, allowlist: dict[str, Target] | None = None) -> tuple[Target, "urlparse"]:
+    """Authorize an arbitrary-depth request URL on an authorized origin only."""
+    if not isinstance(raw_url, str) or not raw_url.strip():
+        raise UnauthorizedTargetError("malformed")
+    cleaned = raw_url.strip()
+    try:
+        parts = urlparse(cleaned)
+    except ValueError:
+        raise UnauthorizedTargetError("malformed")
+    if parts.scheme != "https":
+        raise UnauthorizedTargetError("scheme")
+    if parts.username or parts.password:
+        raise UnauthorizedTargetError("userinfo")
+    if parts.hostname is None or parts.hostname == "":
+        raise UnauthorizedTargetError("malformed")
+    if parts.netloc != parts.hostname:
+        raise UnauthorizedTargetError("port")  # netloc carries a port (or IPv6 literal) — none allowed
+
+    match = [t for t in (allowlist or load_allowlist()).values() if t.host == parts.hostname]
+    if not match:
+        raise UnauthorizedTargetError("not_authorized")
+    # Strip the fragment — clients never send it and it must not affect dedupe.
+    parts = parts._replace(fragment="")
+    return match[0], parts
+
+
+def resolve_and_validate_ips(hostname: str, resolver=None) -> list[str]:
+    """Resolve hostname and require every answer to be a global unicast IP."""
+    lookup = resolver or _default_resolver
+    try:
+        answers = lookup(hostname)
+    except UnauthorizedTargetError:
+        raise
+    except OSError:
+        raise UnauthorizedTargetError("dns_failure")
+    if not answers:
+        raise UnauthorizedTargetError("dns_failure")
+    for ip in answers:
+        _assert_global_ip(ip)
+    return list(answers)
