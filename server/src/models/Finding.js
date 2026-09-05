@@ -24,7 +24,6 @@ const findingSchema = new mongoose.Schema(
     remediation: { type: String, default: '' },
     scannerModule: { type: String, default: '' },
     evidence: { type: mongoose.Schema.Types.Mixed, default: {} },
-    location: { type: String, default: '' }, // legacy alias (Phase 1 shape)
     status: { type: String, enum: FINDING_STATUSES, default: 'open', index: true },
     detectedAt: { type: Date, default: Date.now },
   },

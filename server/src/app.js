@@ -22,9 +22,10 @@ function buildApp() {
   app.use(
     cors({
       origin(origin, cb) {
-        // Allow same-origin/no-origin (curl, mobile app) and configured origins only.
+        // Allowed origins get CORS headers; anything else gets NO headers
+        // (browsers then block the response) — never an error/500.
         if (!origin || env.clientOrigins.includes(origin)) return cb(null, true);
-        cb(new Error('Origin not allowed by CORS'));
+        cb(null, false);
       },
       methods: ['GET', 'POST'],
       credentials: false,

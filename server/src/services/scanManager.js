@@ -270,7 +270,6 @@ async function _storeFindings(scan, findings) {
     remediation: f.remediation || '',
     scannerModule: f.scanner_module || f.module || '',
     evidence: f.evidence && typeof f.evidence === 'object' ? f.evidence : {},
-    location: f.url || '',
     detectedAt: f.timestamp ? new Date(f.timestamp) : new Date(),
   }));
   await Finding.insertMany(docs, { ordered: false });

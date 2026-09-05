@@ -97,6 +97,8 @@ def validate_target_url(raw_url, allowlist: dict[str, Target] | None = None, res
         raise UnauthorizedTargetError("userinfo")
     if parts.hostname is None or parts.hostname == "":
         raise UnauthorizedTargetError("malformed")
+    if parts.netloc != parts.hostname:
+        raise UnauthorizedTargetError("port")  # netloc carries a port (or IPv6 literal) — none allowed
     if parts.path not in ("", "/") or parts.query or parts.fragment:
         raise UnauthorizedTargetError("path")
 

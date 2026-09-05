@@ -8,8 +8,8 @@ async function main() {
   await connectDB();
   await scanManager.recoverOrphans(); // scans from a previous process cannot still be running
   const app = buildApp();
-  const server = app.listen(env.port, () => {
-    console.log(`[api] listening on http://localhost:${env.port} (${env.nodeEnv})`);
+  const server = app.listen(env.port, env.host, () => {
+    console.log(`[api] listening on http://${env.host}:${env.port} (${env.nodeEnv})`);
   });
 
   const shutdown = async (signal) => {

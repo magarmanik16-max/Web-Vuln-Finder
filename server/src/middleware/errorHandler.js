@@ -10,7 +10,8 @@ function errorHandler(err, req, res, next) {
     return res.status(400).json({ error: 'Invalid request body' });
   }
   if (err.name === 'ValidationError') {
-    return res.status(400).json({ error: 'Validation failed', details: err.message });
+    // generic message — schema internals must not leak to clients
+    return res.status(400).json({ error: 'Validation failed' });
   }
   if (err.statusCode && err.statusCode < 500) {
     return res.status(err.statusCode).json({ error: err.message, code: err.code || undefined });

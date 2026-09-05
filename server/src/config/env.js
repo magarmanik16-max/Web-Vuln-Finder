@@ -11,6 +11,7 @@ const nodeEnv = process.env.NODE_ENV || 'development';
 
 const env = {
   nodeEnv,
+  host: process.env.HOST || '127.0.0.1', // loopback by default — expose deliberately via HOST=0.0.0.0
   port: parseInt(process.env.PORT || '5000', 10),
   mongoUri: process.env.MONGODB_URI || 'mongodb://127.0.0.1:27017/webvulnapp',
   jwtSecret: process.env.JWT_SECRET,

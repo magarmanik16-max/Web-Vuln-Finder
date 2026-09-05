@@ -10,7 +10,7 @@ Final-year cybersecurity project. The platform assesses **exactly two targets**
 
 The allowlist is **architectural**: the browser can never submit a URL — only a
 target ID — and both the Node layer and the Python scanner independently
-re-enforce the same restriction. See [docs/SECURITY-DESIGN.md](docs/SECURITY-DESIGN.md).
+re-enforce the same restriction. See [docs/security.md](docs/security.md).
 
 ## Architecture
 
@@ -121,7 +121,18 @@ node tests/e2e-phase3.mjs     # full E2E: both targets, live scans, reports, PDF
 - Helmet secure headers, strict CORS allowlist, JSON body limit, rate limiting
   (global 300/15 min, auth 20/15 min), centralized error handling without stack leaks.
 - Target authorization: exact allowlist match + full SSRF guard (see
-  [docs/SECURITY-DESIGN.md](docs/SECURITY-DESIGN.md)) — mirrored in Python.
+  [docs/security.md](docs/security.md)) — mirrored in Python.
 - Audit logging (`AuditLog` collection) with automatic secret redaction.
 
 Full Phase 1 status: [docs/PHASE1.md](docs/PHASE1.md).
+
+## Documentation
+
+- [docs/architecture.md](docs/architecture.md) — system architecture & data model
+- [docs/security.md](docs/security.md) — security model: target allowlist, SSRF prevention, audit design
+- [docs/scanner-methodology.md](docs/scanner-methodology.md) — what the scanner checks and how it stays safe
+- [docs/api.md](docs/api.md) — full API reference
+- [docs/testing.md](docs/testing.md) — test suites and how to run them
+- [docs/limitations.md](docs/limitations.md) — honest limitations
+- [docs/PRESENTATION.md](docs/PRESENTATION.md) — academic/presentation material
+- [docs/PHASE1.md](docs/PHASE1.md) · [docs/PHASE2.md](docs/PHASE2.md) · [docs/PHASE3.md](docs/PHASE3.md) — phase reports

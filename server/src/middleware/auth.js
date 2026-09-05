@@ -15,7 +15,7 @@ async function requireAuth(req, res, next) {
 
     let payload;
     try {
-      payload = jwt.verify(token, env.jwtSecret);
+      payload = jwt.verify(token, env.jwtSecret, { algorithms: ['HS256'] });
     } catch {
       return res.status(401).json({ error: 'Invalid or expired token' });
     }
@@ -45,7 +45,7 @@ async function softAuth(req, _res, next) {
     if (!token) return next();
     let payload;
     try {
-      payload = jwt.verify(token, env.jwtSecret);
+      payload = jwt.verify(token, env.jwtSecret, { algorithms: ['HS256'] });
     } catch {
       return next();
     }
