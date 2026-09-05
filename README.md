@@ -36,6 +36,31 @@ docs/      ARCHITECTURE.md · SECURITY-DESIGN.md · PHASE1.md · PHASE2.md · PH
 tests/     tests/smoke.mjs + tests/e2e-phase3.mjs — E2E against the running stack
 ```
 
+## Quick Start
+
+```bash
+chmod +x start.sh
+./start.sh
+```
+
+The script handles everything: checks prerequisites (bash, Node >= 20, npm, Python >= 3.10), installs
+server/client npm dependencies on first run, initializes `server/.env` (generating a random JWT secret
+and admin password into the gitignored file — never printed), starts a userspace MongoDB if none is
+running, seeds the admin account, starts the API and dashboard, and waits for each to be genuinely
+ready before reporting success.
+
+- **First run:** `server/.env` is created for you; view `ADMIN_EMAIL` / `ADMIN_PASSWORD` inside it to log in.
+- **MongoDB:** reused if reachable; otherwise started loopback-only from `~/.local/opt/mongodb/bin/mongod`
+  (or `mongod` on PATH) with `dbpath .data/db` — existing data is never overwritten. If no binary exists,
+  the script prints the exact download command and exits.
+- **URLs:** dashboard `http://localhost:5173`, API `http://127.0.0.1:5000` (binding/ports come from `server/.env`).
+- **Stop:** press Ctrl+C — only processes started by the script are terminated (process groups; no `pkill`).
+  Pre-existing services on those ports are detected and reused, never killed.
+- **Failures:** any stage that cannot complete prints the failing component and its log under `.data/logs/`,
+  cleans up the script's own children, and exits non-zero.
+- **Tests separately:** `npm --prefix server test` · `python3 -m unittest discover -s tests` (in `scanner/`) ·
+  `npm --prefix client test` · `node tests/smoke.mjs` (running stack) · `node tests/e2e-phase3.mjs`.
+
 ## Setup
 
 Requirements: Node ≥ 20, npm, Python 3.12+, MongoDB (local).
