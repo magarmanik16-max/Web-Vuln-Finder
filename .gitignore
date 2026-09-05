@@ -1,0 +1,22 @@
+# dependencies
+node_modules/
+
+# secrets — never commit
+.env
+.env.local
+.env.*.local
+
+# local data & tooling
+.data/
+dist/
+build/
+coverage/
+*.log
+
+# python
+__pycache__/
+*.pyc
+.venv/
+
+# OS
+.DS_Store
